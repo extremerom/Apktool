@@ -159,6 +159,21 @@ public class Main {
         .desc("Disable repacking of the built files into a new apk.")
         .build();
 
+    private static final Option buildShortenResPathsOption = Option.builder("srp")
+        .longOpt("shorten-res-paths")
+        .desc("Shortens the paths of resources inside the APK.")
+        .build();
+
+    private static final Option buildEnableSparseEncodingOption = Option.builder("ese")
+        .longOpt("enable-sparse-encoding")
+        .desc("Enables encoding of sparse entries using a binary search tree. This option is useful for optimization of APK size but at the cost of resource retrieval performance.")
+        .build();
+
+    private static final Option buildCollapseResNamesOption = Option.builder("crn")
+        .longOpt("collapse-res-names")
+        .desc("Collapses resource names to a single value in the key string pool.")
+        .build();
+
     private static final Option buildNoCrunchOption = Option.builder()
         .longOpt("no-crunch")
         .desc("Disable crunching of resource files during the build step.")
@@ -264,6 +279,9 @@ public class Main {
                 buildOptions.addOption(buildDebuggableOption);
                 buildOptions.addOption(buildNetSecConfOption);
                 buildOptions.addOption(buildNoApkOption);
+                buildOptions.addOption(buildShortenResPathsOption);
+                buildOptions.addOption(buildEnableSparseEncodingOption);
+                buildOptions.addOption(buildCollapseResNamesOption);
                 buildOptions.addOption(buildNoCrunchOption);
             }
         }
@@ -542,6 +560,15 @@ public class Main {
         }
         if (cli.hasOption(buildNoApkOption)) {
             config.setNoApk(true);
+        }
+        if (cli.hasOption(buildShortenResPathsOption)) {
+            config.setShortenResPaths(true);
+        }
+        if (cli.hasOption(buildEnableSparseEncodingOption)) {
+            config.setEnableSparseEncoding(true);
+        }
+        if (cli.hasOption(buildCollapseResNamesOption)) {
+            config.setCollapseResNames(true);
         }
         if (cli.hasOption(buildNoCrunchOption)) {
             config.setNoCrunch(true);
