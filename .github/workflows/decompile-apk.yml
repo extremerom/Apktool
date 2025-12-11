@@ -29,23 +29,14 @@ jobs:
           echo "Setting up zram for compressed swap..."
           # Install zram-config if not available
           sudo apt-get update -qq
-          sudo apt-get install -y zram-config
           # Configure zram to use 8GB of compressed RAM
+          sudo apt install linux-modules-extra-$(uname -r) zram-tools -y
           sudo modprobe zram
-          # Check if zram0 device is available after module load
-          if [ -e /sys/block/zram0/disksize ]; then
-            # Create a 8GB zram device
-            echo 8G | sudo tee /sys/block/zram0/disksize
-            sudo mkswap /dev/zram0
-            sudo swapon /dev/zram0
-            # Verify zram is active
-            echo "Zram configured successfully:"
-          else
-            echo "Warning: Zram device not available, skipping zram setup"
-          fi
-          swapon --show
-          free -h
-
+          sudo sed -i 's/^#PERCENT=50/PERCENT=90/' /etc/default/zramswap
+          sudo sed -i 's/^#PRIORITY=100/PRIORITY=1000/' /etc/default/zramswap
+          sudo systemctl restart zramswap
+          zramctl
+          
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
