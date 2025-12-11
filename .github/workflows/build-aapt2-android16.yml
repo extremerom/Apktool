@@ -22,6 +22,8 @@ jobs:
   build-linux-windows:
     name: Build aapt2_64 (Linux/Windows)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # This job requires a lot of disk space for AOSP
     # GitHub Actions runners have ~14GB available, but AOSP needs 150-250GB
     # This workflow is designed for self-hosted runners with sufficient disk space
@@ -138,6 +140,8 @@ jobs:
   build-macos:
     name: Build aapt2_64 (macOS)
     runs-on: macos-latest
+    permissions:
+      contents: read
     # macOS builds require special SDK version patches
     # This job also requires significant disk space for AOSP
     
@@ -263,6 +267,8 @@ jobs:
   verify-and-package:
     name: Verify and Package All Binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: [build-linux-windows, build-macos]
     if: always()
     
