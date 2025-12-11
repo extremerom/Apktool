@@ -25,3 +25,7 @@ gradle.properties
 
 # Patches
 *.patch
+
+# Script jars (should be built, not committed)
+scripts/*/apktool.jar
+scripts/*/apktool_*.jar
