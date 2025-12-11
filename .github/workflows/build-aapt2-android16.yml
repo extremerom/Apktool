@@ -210,14 +210,14 @@ jobs:
             echo "Patching $DARWIN_CONFIG to support macOS SDK $SDK_VERSION"
             
             # Backup the original file
-            cp "$DARWIN_CONFIG" "${DARWIN_CONFIG}.bak"
+            cp "$DARWIN_CONFIG" "${DARWIN_CONFIG}.orig"
             
             # Add the SDK version to darwinSupportedSdkVersions array
-            # This is a simple approach - in production, you might want a more robust patch
-            sed -i.tmp "/darwinSupportedSdkVersions/,/\]/ s/\]/\t\"$SDK_VERSION\",\n\t]/" "$DARWIN_CONFIG"
+            # Go allows trailing commas in arrays, so we can safely add it before the closing bracket
+            sed -i.bak "/darwinSupportedSdkVersions/,/\]/ s/\]/\t\"$SDK_VERSION\",\n\t]/" "$DARWIN_CONFIG"
             
             echo "Patch applied. Showing diff:"
-            diff "${DARWIN_CONFIG}.bak" "$DARWIN_CONFIG" || true
+            diff "${DARWIN_CONFIG}.orig" "$DARWIN_CONFIG" || true
           else
             echo "Warning: $DARWIN_CONFIG not found"
           fi
@@ -229,7 +229,7 @@ jobs:
       - name: Build aapt2 for macOS
         run: |
           cd ~/aosp
-          export ANDROID_JAVA_HOME=${{ env.ANDROID_JAVA_HOME }}
+          export ANDROID_JAVA_HOME=$JAVA_HOME
           source build/envsetup.sh
           lunch aosp_cf_x86_64_only_phone-aosp_current-eng
           m aapt2
