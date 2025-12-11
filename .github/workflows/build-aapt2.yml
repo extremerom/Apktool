@@ -25,6 +25,10 @@ env:
   # Optimize repo sync for smaller clone
   REPO_INIT_FLAGS: '--depth=1 --partial-clone'
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   build-linux-windows-aapt2:
     name: Build Linux and Windows aapt2_64
