@@ -148,6 +148,49 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Install Git LFS
+        run: |
+          # Install Git LFS (should already be available on ubuntu-latest)
+          git lfs version || (sudo apt-get update && sudo apt-get install -y git-lfs)
+          echo "Git LFS installed successfully"
+
+      - name: Track large files with Git LFS
+        run: |
+          cd decompiled
+          
+          # Initialize git repository first (needed for git lfs)
+          git init
+          
+          # Initialize Git LFS
+          git lfs install
+          
+          # Find files larger than 99MB and track them with Git LFS
+          echo "Scanning for files larger than 99MB..."
+          LARGE_FILES_FOUND=false
+          
+          # Find files larger than 99MB (99 * 1024 * 1024 bytes = 103809024 bytes)
+          while IFS= read -r -d '' file; do
+            if [ -f "$file" ]; then
+              size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+              if [ "$size" -gt 103809024 ]; then
+                LARGE_FILES_FOUND=true
+                size_mb=$(echo "scale=2; $size / 1024 / 1024" | bc)
+                echo "Found large file: $file (${size_mb}MB)"
+                
+                # Track this file pattern with git lfs
+                git lfs track "$file"
+              fi
+            fi
+          done < <(find . -type f -print0)
+          
+          if [ "$LARGE_FILES_FOUND" = true ]; then
+            echo "✅ Large files tracked with Git LFS"
+            echo "Git LFS tracking patterns:"
+            cat .gitattributes
+          else
+            echo "ℹ️  No files larger than 99MB found"
+          fi
+
       - name: Push decompiled content to new repository
         env:
           GH_TOKEN: ${{ secrets.TEST }}
@@ -155,11 +198,24 @@ jobs:
           REPO_NAME: ${{ steps.create-repo.outputs.final_repo_name }}
         run: |
           cd decompiled
-          git init
+          
+          # Add all files (git lfs will handle large files automatically)
           git add .
-          git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})"
+          
+          # Commit with information about large files if any
+          if [ -f .gitattributes ]; then
+            git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
+                       -m "Large files tracked with Git LFS (see .gitattributes)"
+          else
+            git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})"
+          fi
+          
+          # Configure remote and push
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/$TARGET_USER/$REPO_NAME.git"
           git branch -M main
+          
+          # Push with git lfs
+          git lfs push origin main --all || echo "No LFS files to push"
           git push -u origin main
 
           echo "✅ Decompiled content pushed successfully to: https://github.com/$TARGET_USER/$REPO_NAME"
