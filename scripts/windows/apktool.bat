@@ -88,16 +88,16 @@ if "%~1"=="" goto run_apktool
 rem Check if argument starts with -J
 echo %1 | findstr /B /C:"-J" >nul
 if %errorlevel% equ 0 (
-    rem Extract JVM option (remove -J prefix, e.g., -JXmx2048M becomes Xmx2048M)
+    rem Extract JVM option (remove -J prefix, e.g., -JXmx2048M becomes -Xmx2048M)
     rem Use for loop to extract substring without needing delayed expansion
     for /f "usebackq tokens=*" %%a in ('%1') do set "tempArg=%%a"
     call set "opt=%%tempArg:~2%%"
-    set "javaOpts=%javaOpts% %opt%"
+    set "javaOpts=%javaOpts% -%opt%"
     shift
     goto parse_args
 ) else (
     rem Regular argument - add to apktool args
-    set "apktoolArgs=%apktoolArgs% %~1"
+    set "apktoolArgs=%apktoolArgs% "%~1""
     shift
     goto parse_args
 )
