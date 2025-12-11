@@ -225,7 +225,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew install git python3 openjdk@11
-          echo 'export PATH="/opt/homebrew/opt/openjdk@11/bin:$PATH"' >> ~/.zshrc
+          echo "/opt/homebrew/opt/openjdk@11/bin" >> $GITHUB_PATH
 
       - name: Set up repo tool
         run: |
@@ -268,18 +268,29 @@ jobs:
           cd ~/aosp
           # Find the SDK version
           SDK_PATH=$(find /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs -iname "*.sdk" | head -n 1)
-          SDK_VERSION=$(basename "$SDK_PATH" .sdk | sed 's/MacOSX//')
-          echo "Detected macOS SDK version: $SDK_VERSION"
+          if [ -n "$SDK_PATH" ]; then
+            SDK_VERSION=$(basename "$SDK_PATH" .sdk | sed 's/MacOSX//')
+            echo "Detected macOS SDK version: $SDK_VERSION"
 
-          # Patch darwin_host.go if needed
-          if [ -f build/soong/cc/config/darwin_host.go ]; then
-            # Add SDK version to supported list if not already present
-            if ! grep -q "\"$SDK_VERSION\"" build/soong/cc/config/darwin_host.go; then
-              echo "Adding SDK version $SDK_VERSION to supported list"
-              # This is a placeholder - actual implementation may need adjustment
-              sed -i.bak "/darwinSupportedSdkVersions/a\\
-          \"$SDK_VERSION\"," build/soong/cc/config/darwin_host.go || true
+            # Patch darwin_host.go if needed
+            if [ -f build/soong/cc/config/darwin_host.go ]; then
+              # Check if SDK version is already in the supported list
+              if ! grep -q "\"$SDK_VERSION\"" build/soong/cc/config/darwin_host.go; then
+                echo "Adding SDK version $SDK_VERSION to supported list"
+                # Backup the file
+                cp build/soong/cc/config/darwin_host.go build/soong/cc/config/darwin_host.go.bak
+                # Add the SDK version to the array
+                # This adds it after the darwinSupportedSdkVersions declaration
+                awk -v sdk="$SDK_VERSION" '
+                  /darwinSupportedSdkVersions.*=.*\[/ { print; getline; print "\t\t\"" sdk "\","; print; next }
+                  { print }
+                ' build/soong/cc/config/darwin_host.go.bak > build/soong/cc/config/darwin_host.go
+              else
+                echo "SDK version $SDK_VERSION already in supported list"
+              fi
             fi
+          else
+            echo "Warning: Could not detect macOS SDK, build may fail"
           fi
 
       - name: Build aapt2 for macOS

@@ -41,7 +41,12 @@ The workflow automates the process described in `INTERNAL.md` for building modif
 According to `INTERNAL.md`:
 
 - **AOSP**: Currently using `android-16-release`
-- **Apktool frameworks/base**: Branch naming follows Android version (e.g., `apktool_7.1` for Android 7.1, `apktool-9.0.0` for Android 9.0 Pie)
+- **Apktool frameworks/base**: Branch naming follows Android version
+  - Older versions use underscore: `apktool_7.1` (for Android 7.1)
+  - Newer versions use hyphen: `apktool-9.0.0` (for Android 9.0 Pie)
+  - Current default: `apktool-9.0.0`
+
+**Note**: The naming convention changed at Android 7.1. Check the [platform_frameworks_base repository](https://github.com/iBotPeaches/platform_frameworks_base) for available branches.
 
 ## Build Process
 
