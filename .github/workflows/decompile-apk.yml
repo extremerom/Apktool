@@ -168,13 +168,15 @@ jobs:
           echo "Scanning for files larger than 99MB..."
           LARGE_FILES_FOUND=false
           
-          # Find files larger than 99MB (99 * 1024 * 1024 bytes = 103809024 bytes)
+          # Find files larger than 99MB (99 * 1024 * 1024 bytes = 103,809,024 bytes = 99 MiB)
+          # Using MiB (binary) threshold to stay safely under GitHub's 100MB limit
           while IFS= read -r -d '' file; do
             if [ -f "$file" ]; then
               size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
               if [ "$size" -gt 103809024 ]; then
                 LARGE_FILES_FOUND=true
-                size_mb=$(echo "scale=2; $size / 1024 / 1024" | bc)
+                # Calculate size in MB for display (without bc dependency)
+                size_mb=$((size / 1024 / 1024))
                 echo "Found large file: $file (${size_mb}MB)"
                 
                 # Track this file pattern with git lfs
@@ -214,8 +216,13 @@ jobs:
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/$TARGET_USER/$REPO_NAME.git"
           git branch -M main
           
-          # Push with git lfs
-          git lfs push origin main --all || echo "No LFS files to push"
+          # Push with git lfs if there are tracked files
+          if git lfs ls-files | grep -q .; then
+            echo "Pushing LFS files..."
+            git lfs push origin main --all
+          else
+            echo "No LFS files to push"
+          fi
           git push -u origin main
 
           echo "✅ Decompiled content pushed successfully to: https://github.com/$TARGET_USER/$REPO_NAME"
