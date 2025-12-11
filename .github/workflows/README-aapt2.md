@@ -48,8 +48,6 @@ According to `INTERNAL.md`:
 
 ## Build Process
 
-## Build Process
-
 The workflow performs the following steps:
 
 1. **Maximize disk space**
