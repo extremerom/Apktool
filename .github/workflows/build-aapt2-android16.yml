@@ -11,7 +11,7 @@ on:
       android_tag:
         description: 'AOSP tag/branch to use'
         required: true
-        default: 'android-16-release'
+        default: 'android-16.0.0_r4'
         type: string
 
 env:
