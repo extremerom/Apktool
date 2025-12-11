@@ -465,7 +465,7 @@ public class BinaryXmlResourceParser implements XmlResourceParser {
             setFirstError(ex);
         }
 
-        LOGGER.warning(String.format(
+        LOGGER.fine(String.format(
             "Could not decode attr value: ns=%s, name=%s, value=0x%08x",
             getAttributePrefix(index), getAttributeName(index), valueData));
         decoded = ResXmlEncoders.coerceToString(valueType, valueData);
