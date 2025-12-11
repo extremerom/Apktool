@@ -92,7 +92,7 @@ jobs:
       - name: Decompile APK
         run: |
           echo "Decompiling APK with dm2q framework..."
-          apktool d app.apk -o decompiled -f -t dm2q -p apktool-frameworks
+          apktool d --no-debug-info -o decompiled -t dm2q -p apktool-frameworks app.apk 
           if [ ! -d decompiled ]; then
             echo "Error: Decompilation failed"
             exit 1
