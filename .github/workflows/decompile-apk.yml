@@ -48,6 +48,46 @@ on:
         required: false
         type: boolean
         default: false
+      only_main_classes:
+        description: 'Only disassemble main dex classes (--only-main-classes)'
+        required: false
+        type: boolean
+        default: false
+      keep_debug_info:
+        description: 'Include debug info in sources (default: disabled with --no-debug-info)'
+        required: false
+        type: boolean
+        default: false
+      only_manifest:
+        description: 'Only decode AndroidManifest.xml (--only-manifest)'
+        required: false
+        type: boolean
+        default: false
+      res_resolve_mode:
+        description: 'Resources resolve mode: remove, dummy, or keep (--res-resolve-mode)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - remove
+          - dummy
+          - keep
+        default: ''
+      keep_broken_res:
+        description: 'Keep broken resources (--keep-broken-res)'
+        required: false
+        type: boolean
+        default: false
+      match_original:
+        description: 'Keep files closest to original (--match-original)'
+        required: false
+        type: boolean
+        default: false
+      no_assets:
+        description: 'Do not decode assets (--no-assets)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   decompile-and-upload:
@@ -141,7 +181,8 @@ jobs:
         run: |
           echo "Decompiling APK with dm2q framework..."
           # Build apktool command with optional parameters using array
-          CMD=(apktool d --no-debug-info -o decompiled -t dm2q -p apktool-frameworks)
+          # Note: --no-debug-info is controlled by keep_debug_info input
+          CMD=(apktool d -o decompiled -t dm2q -p apktool-frameworks)
           
           # Check mutual exclusivity of quiet and verbose flags
           if [ "${{ github.event.inputs.quiet }}" = "true" ] && [ "${{ github.event.inputs.verbose }}" = "true" ]; then
@@ -213,6 +254,74 @@ jobs:
           if [ "${{ github.event.inputs.no_src }}" = "true" ]; then
             CMD+=(-s)
             echo "Skipping source decoding (-s)"
+          fi
+          
+          # Add optional only-main-classes flag
+          if [ "${{ github.event.inputs.only_main_classes }}" = "true" ]; then
+            if [ "${{ github.event.inputs.no_src }}" = "true" ]; then
+              echo "Error: only-main-classes conflicts with no-src"
+              exit 1
+            fi
+            CMD+=(--only-main-classes)
+            echo "Only disassembling main dex classes (--only-main-classes)"
+          fi
+          
+          # Add no-debug-info flag (default behavior unless keep_debug_info is true)
+          if [ "${{ github.event.inputs.keep_debug_info }}" != "true" ]; then
+            CMD+=(--no-debug-info)
+            echo "Excluding debug info from sources (--no-debug-info)"
+          else
+            echo "Keeping debug info in sources"
+          fi
+          
+          # Add optional only-manifest flag
+          if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
+            if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+              echo "Error: only-manifest conflicts with no-res"
+              exit 1
+            fi
+            CMD+=(--only-manifest)
+            echo "Only decoding AndroidManifest.xml (--only-manifest)"
+          fi
+          
+          # Add optional res-resolve-mode
+          if [ -n "${{ github.event.inputs.res_resolve_mode }}" ]; then
+            if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+              echo "Error: res-resolve-mode conflicts with no-res"
+              exit 1
+            fi
+            if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
+              echo "Error: res-resolve-mode conflicts with only-manifest"
+              exit 1
+            fi
+            CMD+=(--res-resolve-mode "${{ github.event.inputs.res_resolve_mode }}")
+            echo "Using resource resolve mode: ${{ github.event.inputs.res_resolve_mode }}"
+          fi
+          
+          # Add optional keep-broken-res flag
+          if [ "${{ github.event.inputs.keep_broken_res }}" = "true" ]; then
+            if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+              echo "Error: keep-broken-res conflicts with no-res"
+              exit 1
+            fi
+            if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
+              echo "Error: keep-broken-res conflicts with only-manifest"
+              exit 1
+            fi
+            CMD+=(--keep-broken-res)
+            echo "Keeping broken resources (--keep-broken-res)"
+          fi
+          
+          # Add optional match-original flag
+          if [ "${{ github.event.inputs.match_original }}" = "true" ]; then
+            CMD+=(--match-original)
+            echo "Keeping files closest to original (--match-original)"
+          fi
+          
+          # Add optional no-assets flag
+          if [ "${{ github.event.inputs.no_assets }}" = "true" ]; then
+            CMD+=(--no-assets)
+            echo "Skipping asset decoding (--no-assets)"
           fi
           
           # Add APK file at the end

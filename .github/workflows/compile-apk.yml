@@ -32,6 +32,51 @@ on:
         required: false
         type: string
         default: ''
+      no_apk:
+        description: 'Disable repacking into APK (--no-apk)'
+        required: false
+        type: boolean
+        default: false
+      shorten_res_paths:
+        description: 'Shorten resource paths (-srp/--shorten-res-paths)'
+        required: false
+        type: boolean
+        default: false
+      enable_sparse_encoding:
+        description: 'Enable sparse encoding (-ese/--enable-sparse-encoding)'
+        required: false
+        type: boolean
+        default: false
+      collapse_res_names:
+        description: 'Collapse resource names (-crn/--collapse-res-names)'
+        required: false
+        type: boolean
+        default: false
+      no_crunch:
+        description: 'Disable resource file crunching (--no-crunch)'
+        required: false
+        type: boolean
+        default: false
+      copy_original:
+        description: 'Copy original AndroidManifest.xml and META-INF (--copy-original)'
+        required: false
+        type: boolean
+        default: false
+      debuggable:
+        description: 'Set android:debuggable to true (--debuggable)'
+        required: false
+        type: boolean
+        default: false
+      net_sec_conf:
+        description: 'Add network security configuration (--net-sec-conf)'
+        required: false
+        type: boolean
+        default: false
+      aapt:
+        description: 'Path to custom aapt2 binary (--aapt)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   compile-and-sign:
@@ -202,6 +247,65 @@ jobs:
               CMD+=(-l "$lib")
               echo "Using shared library: $lib"
             done
+          fi
+          
+          # Add optional no-apk flag
+          if [ "${{ github.event.inputs.no_apk }}" = "true" ]; then
+            CMD+=(--no-apk)
+            echo "Disabling APK repacking (--no-apk)"
+          fi
+          
+          # Add optional shorten-res-paths flag
+          if [ "${{ github.event.inputs.shorten_res_paths }}" = "true" ]; then
+            CMD+=(--shorten-res-paths)
+            echo "Shortening resource paths (--shorten-res-paths)"
+          fi
+          
+          # Add optional enable-sparse-encoding flag
+          if [ "${{ github.event.inputs.enable_sparse_encoding }}" = "true" ]; then
+            CMD+=(--enable-sparse-encoding)
+            echo "Enabling sparse encoding (--enable-sparse-encoding)"
+          fi
+          
+          # Add optional collapse-res-names flag
+          if [ "${{ github.event.inputs.collapse_res_names }}" = "true" ]; then
+            CMD+=(--collapse-res-names)
+            echo "Collapsing resource names (--collapse-res-names)"
+          fi
+          
+          # Add optional no-crunch flag
+          if [ "${{ github.event.inputs.no_crunch }}" = "true" ]; then
+            CMD+=(--no-crunch)
+            echo "Disabling resource crunching (--no-crunch)"
+          fi
+          
+          # Add optional copy-original flag
+          if [ "${{ github.event.inputs.copy_original }}" = "true" ]; then
+            CMD+=(--copy-original)
+            echo "Copying original files (--copy-original)"
+          fi
+          
+          # Add optional debuggable flag
+          if [ "${{ github.event.inputs.debuggable }}" = "true" ]; then
+            CMD+=(--debuggable)
+            echo "Setting android:debuggable to true (--debuggable)"
+          fi
+          
+          # Add optional net-sec-conf flag
+          if [ "${{ github.event.inputs.net_sec_conf }}" = "true" ]; then
+            CMD+=(--net-sec-conf)
+            echo "Adding network security configuration (--net-sec-conf)"
+          fi
+          
+          # Add optional aapt parameter with validation
+          if [ -n "${{ github.event.inputs.aapt }}" ]; then
+            # Validate path doesn't contain path traversal
+            if [[ "${{ github.event.inputs.aapt }}" == *".."* ]]; then
+              echo "Error: aapt path cannot contain '..' sequences"
+              exit 1
+            fi
+            CMD+=(--aapt "${{ github.event.inputs.aapt }}")
+            echo "Using custom aapt2 binary: ${{ github.event.inputs.aapt }}"
           fi
           
           echo "Executing: ${CMD[@]}"
