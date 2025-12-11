@@ -1,0 +1,174 @@
+name: Decompile APK and Upload to Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: 'URL to download the APK'
+        required: true
+        type: string
+      target_username:
+        description: 'GitHub username where the repository will be created'
+        required: true
+        type: string
+        # Note: Ensure only trusted users can trigger this workflow as it creates
+        # repositories under the specified username using the TEST token
+
+jobs:
+  decompile-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5.0.0
+
+      - name: Build apktool
+        run: ./gradlew build shadowJar proguard
+
+      - name: Setup apktool script
+        run: |
+          # Find the built apktool jar
+          JAR_PATH=$(find brut.apktool/apktool-cli/build/libs -name "apktool-v*.jar" | head -n 1)
+          if [ -z "$JAR_PATH" ]; then
+            echo "Error: Could not find apktool jar"
+            exit 1
+          fi
+          echo "Found apktool jar at: $JAR_PATH"
+
+          # Copy the jar to the script directory and rename it
+          cp "$JAR_PATH" scripts/linux/apktool.jar
+
+          # Make the apktool script executable
+          chmod +x scripts/linux/apktool
+
+          # Add the script directory to PATH
+          echo "$GITHUB_WORKSPACE/scripts/linux" >> $GITHUB_PATH
+
+          # Verify setup
+          ls -la scripts/linux/
+          echo "Apktool script configured in PATH"
+
+      - name: Download Samsung framework
+        run: |
+          echo "Downloading Samsung dm2q framework..."
+          curl -L -o framework-dm2q.apk "https://gitlab.com/Eduardob3677/samsung_dm2q_dump/-/raw/dm2qxxx-user-16-BP2A.250605.031.A3-S916BXXS8EYK2-release-keys/system/system/framework/framework-res.apk"
+          if [ ! -f framework-dm2q.apk ]; then
+            echo "Error: Failed to download framework"
+            exit 1
+          fi
+          echo "Framework downloaded successfully"
+          ls -lh framework-dm2q.apk
+
+      - name: Install framework with dm2q tag
+        run: |
+          echo "Creating framework directory..."
+          mkdir -p apktool-frameworks
+          echo "Installing framework with tag dm2q to apktool-frameworks..."
+          apktool if framework-dm2q.apk -t dm2q -p apktool-frameworks
+          echo "Framework installed successfully with tag dm2q"
+
+      - name: Download APK
+        run: |
+          echo "Downloading APK from ${{ github.event.inputs.apk_url }}"
+          curl -L -o app.apk "${{ github.event.inputs.apk_url }}"
+          if [ ! -f app.apk ]; then
+            echo "Error: Failed to download APK"
+            exit 1
+          fi
+          echo "APK downloaded successfully"
+          ls -lh app.apk
+
+      - name: Decompile APK
+        run: |
+          echo "Decompiling APK with dm2q framework..."
+          apktool d app.apk -o decompiled -f -t dm2q -p apktool-frameworks
+          if [ ! -d decompiled ]; then
+            echo "Error: Decompilation failed"
+            exit 1
+          fi
+          echo "Decompilation completed successfully"
+
+      - name: Extract package name
+        id: package-name
+        run: |
+          # Extract package name from AndroidManifest.xml
+          if [ -f decompiled/AndroidManifest.xml ]; then
+            PACKAGE=$(grep -oP 'package="\K[^"]+' decompiled/AndroidManifest.xml | head -n 1)
+            if [ -z "$PACKAGE" ]; then
+              echo "Error: Could not extract package name"
+              exit 1
+            fi
+            # Replace dots with underscores
+            REPO_NAME=$(echo "$PACKAGE" | tr '.' '_')
+            echo "package=$PACKAGE" >> $GITHUB_OUTPUT
+            echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+            echo "Package: $PACKAGE"
+            echo "Repository name: $REPO_NAME"
+          else
+            echo "Error: AndroidManifest.xml not found"
+            exit 1
+          fi
+
+      - name: Check and create repository
+        id: create-repo
+        env:
+          GH_TOKEN: ${{ secrets.TEST }}
+          TARGET_USER: ${{ github.event.inputs.target_username }}
+          BASE_REPO_NAME: ${{ steps.package-name.outputs.repo_name }}
+        run: |
+          REPO_NAME="$BASE_REPO_NAME"
+          COUNTER=2
+
+          # Check if repository exists and find available name
+          while gh repo view "$TARGET_USER/$REPO_NAME" &>/dev/null; do
+            echo "Repository $TARGET_USER/$REPO_NAME already exists"
+            REPO_NAME="${BASE_REPO_NAME}_${COUNTER}"
+            COUNTER=$((COUNTER + 1))
+          done
+
+          echo "Creating repository: $TARGET_USER/$REPO_NAME"
+          gh repo create "$TARGET_USER/$REPO_NAME" --public --description "Decompiled APK: ${{ steps.package-name.outputs.package }}"
+
+          echo "final_repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+          echo "Repository created: $TARGET_USER/$REPO_NAME"
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Push decompiled content to new repository
+        env:
+          GH_TOKEN: ${{ secrets.TEST }}
+          TARGET_USER: ${{ github.event.inputs.target_username }}
+          REPO_NAME: ${{ steps.create-repo.outputs.final_repo_name }}
+        run: |
+          cd decompiled
+          git init
+          git add .
+          git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/$TARGET_USER/$REPO_NAME.git"
+          git branch -M main
+          git push -u origin main
+
+          echo "✅ Decompiled content pushed successfully to: https://github.com/$TARGET_USER/$REPO_NAME"
+
+      - name: Summary
+        run: |
+          echo "## Decompilation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package**: ${{ steps.package-name.outputs.package }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: [${{ github.event.inputs.target_username }}/${{ steps.create-repo.outputs.final_repo_name }}](https://github.com/${{ github.event.inputs.target_username }}/${{ steps.create-repo.outputs.final_repo_name }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Decompilation completed successfully!" >> $GITHUB_STEP_SUMMARY

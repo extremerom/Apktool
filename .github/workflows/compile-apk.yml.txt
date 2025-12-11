@@ -1,0 +1,228 @@
+name: Compile and Sign APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: 'GitHub repository URL with decompiled APK (e.g., https://github.com/username/repo)'
+        required: true
+        type: string
+
+jobs:
+  compile-and-sign:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout apktool repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5.0.0
+
+      - name: Build apktool
+        run: ./gradlew build shadowJar proguard
+
+      - name: Setup apktool script
+        run: |
+          # Find the built apktool jar
+          JAR_PATH=$(find brut.apktool/apktool-cli/build/libs -name "apktool-v*.jar" | head -n 1)
+          if [ -z "$JAR_PATH" ]; then
+            echo "Error: Could not find apktool jar"
+            exit 1
+          fi
+          echo "Found apktool jar at: $JAR_PATH"
+
+          # Copy the jar to the script directory and rename it
+          cp "$JAR_PATH" scripts/linux/apktool.jar
+
+          # Make the apktool script executable
+          chmod +x scripts/linux/apktool
+
+          # Add the script directory to PATH
+          echo "$GITHUB_WORKSPACE/scripts/linux" >> $GITHUB_PATH
+
+          # Verify setup
+          ls -la scripts/linux/
+          echo "Apktool script configured in PATH"
+
+      - name: Download Samsung framework
+        run: |
+          echo "Downloading Samsung dm2q framework..."
+          curl -L -o framework-dm2q.apk "https://gitlab.com/Eduardob3677/samsung_dm2q_dump/-/raw/dm2qxxx-user-16-BP2A.250605.031.A3-S916BXXS8EYK2-release-keys/system/system/framework/framework-res.apk"
+          if [ ! -f framework-dm2q.apk ]; then
+            echo "Error: Failed to download framework"
+            exit 1
+          fi
+          echo "Framework downloaded successfully"
+          ls -lh framework-dm2q.apk
+
+      - name: Install framework with dm2q tag
+        run: |
+          echo "Creating framework directory..."
+          mkdir -p apktool-frameworks
+          echo "Installing framework with tag dm2q to apktool-frameworks..."
+          apktool if framework-dm2q.apk -t dm2q -p apktool-frameworks
+          echo "Framework installed successfully with tag dm2q"
+
+      - name: Clone decompiled repository
+        run: |
+          echo "Cloning repository: ${{ github.event.inputs.repo_url }}"
+          git clone "${{ github.event.inputs.repo_url }}" decompiled
+          if [ ! -d decompiled ]; then
+            echo "Error: Failed to clone repository"
+            exit 1
+          fi
+          echo "Repository cloned successfully"
+          ls -la decompiled/
+
+      - name: Extract package name
+        id: package-name
+        run: |
+          # Extract package name from AndroidManifest.xml
+          if [ -f decompiled/AndroidManifest.xml ]; then
+            PACKAGE=$(grep -oP 'package="\K[^"]+' decompiled/AndroidManifest.xml | head -n 1)
+            if [ -z "$PACKAGE" ]; then
+              echo "Error: Could not extract package name"
+              exit 1
+            fi
+            echo "package=$PACKAGE" >> $GITHUB_OUTPUT
+            echo "Package: $PACKAGE"
+          else
+            echo "Error: AndroidManifest.xml not found"
+            exit 1
+          fi
+
+      - name: Compile APK
+        run: |
+          echo "Compiling APK with dm2q framework..."
+          apktool b decompiled -o compiled.apk -t dm2q -p apktool-frameworks
+          if [ ! -f compiled.apk ]; then
+            echo "Error: Compilation failed"
+            exit 1
+          fi
+          echo "Compilation completed successfully"
+          ls -lh compiled.apk
+
+      - name: Decode keystore from secret
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Error: KEYSTORE_BASE64 secret is not set"
+            echo "Please configure the KEYSTORE_BASE64 secret in your repository settings"
+            echo "To encode your keystore: base64 -w 0 your-keystore.jks"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > keystore.jks
+          if [ ! -f keystore.jks ]; then
+            echo "Error: Failed to decode keystore"
+            exit 1
+          fi
+          echo "Keystore decoded successfully"
+
+      - name: Install apksigner
+        run: |
+          # Install Android SDK command-line tools
+          mkdir -p android-sdk/cmdline-tools
+          cd android-sdk/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          mv cmdline-tools latest
+          cd ../..
+
+          # Accept licenses and install build-tools
+          yes | android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          android-sdk/cmdline-tools/latest/bin/sdkmanager "build-tools;34.0.0"
+
+          # Add to PATH
+          echo "$(pwd)/android-sdk/build-tools/34.0.0" >> $GITHUB_PATH
+
+      - name: Align APK
+        run: |
+          echo "Aligning APK..."
+          zipalign -v -p 4 compiled.apk compiled-aligned.apk
+          if [ ! -f compiled-aligned.apk ]; then
+            echo "Error: APK alignment failed"
+            exit 1
+          fi
+          echo "APK aligned successfully"
+          ls -lh compiled-aligned.apk
+
+      - name: Sign APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "Signing APK..."
+
+          # Validate that all required secrets are set
+          if [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "Error: KEYSTORE_PASSWORD secret is not set"
+            exit 1
+          fi
+          if [ -z "$KEY_ALIAS" ]; then
+            echo "Error: KEY_ALIAS secret is not set"
+            exit 1
+          fi
+          if [ -z "$KEY_PASSWORD" ]; then
+            echo "Error: KEY_PASSWORD secret is not set"
+            exit 1
+          fi
+
+          apksigner sign --ks keystore.jks \
+            --ks-pass pass:"$KEYSTORE_PASSWORD" \
+            --key-pass pass:"$KEY_PASSWORD" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --out signed.apk \
+            compiled-aligned.apk
+
+          if [ ! -f signed.apk ]; then
+            echo "Error: APK signing failed"
+            exit 1
+          fi
+          echo "APK signed successfully"
+          ls -lh signed.apk
+
+      - name: Verify APK signature
+        run: |
+          echo "Verifying APK signature..."
+          apksigner verify --verbose signed.apk
+          echo "✅ APK signature verified successfully"
+
+      - name: Rename APK with package name
+        id: rename-apk
+        run: |
+          PACKAGE="${{ steps.package-name.outputs.package }}"
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          FINAL_NAME="${PACKAGE}_${TIMESTAMP}_signed.apk"
+          mv signed.apk "$FINAL_NAME"
+          echo "final_name=$FINAL_NAME" >> $GITHUB_OUTPUT
+          echo "Final APK name: $FINAL_NAME"
+
+      - name: Upload signed APK to artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ steps.package-name.outputs.package }}_signed
+          path: ${{ steps.rename-apk.outputs.final_name }}
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "## Compilation and Signing Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package**: ${{ steps.package-name.outputs.package }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source Repository**: ${{ github.event.inputs.repo_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signed APK**: ${{ steps.rename-apk.outputs.final_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ APK compiled and signed successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Download the signed APK from the artifacts section above." >> $GITHUB_STEP_SUMMARY
