@@ -38,10 +38,10 @@ public final class ResXmlEncoders {
                 return data == TypedValue.DATA_NULL_EMPTY ? "@empty" : "@null";
             case TypedValue.TYPE_REFERENCE:
             case TypedValue.TYPE_DYNAMIC_REFERENCE:
-                return data != 0 ? "@" + data : "@null";
+                return data != 0 ? String.format("@0x%08x", data) : "@null";
             case TypedValue.TYPE_ATTRIBUTE:
             case TypedValue.TYPE_DYNAMIC_ATTRIBUTE:
-                return "?" + data;
+                return data != 0 ? String.format("?0x%08x", data) : "?null";
             case TypedValue.TYPE_STRING:
                 throw new IllegalArgumentException("Unexpected data type: TYPE_STRING");
             case TypedValue.TYPE_FLOAT:
