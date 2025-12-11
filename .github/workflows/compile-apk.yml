@@ -144,6 +144,12 @@ jobs:
           # Build apktool command with optional parameters
           CMD="apktool b decompiled -p apktool-frameworks -o compiled.apk"
           
+          # Check mutual exclusivity of quiet and verbose flags
+          if [ "${{ github.event.inputs.quiet }}" = "true" ] && [ "${{ github.event.inputs.verbose }}" = "true" ]; then
+            echo "Error: quiet and verbose flags are mutually exclusive"
+            exit 1
+          fi
+          
           # Add optional quiet flag
           if [ "${{ github.event.inputs.quiet }}" = "true" ]; then
             CMD="$CMD -q"
@@ -162,17 +168,29 @@ jobs:
             echo "Using force mode (-f)"
           fi
           
-          # Add optional jobs parameter
+          # Add optional jobs parameter with validation
           if [ -n "${{ github.event.inputs.jobs }}" ]; then
+            # Validate that jobs is a positive integer
+            if ! [[ "${{ github.event.inputs.jobs }}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Error: jobs must be a positive integer"
+              exit 1
+            fi
             CMD="$CMD -j ${{ github.event.inputs.jobs }}"
             echo "Using ${{ github.event.inputs.jobs }} parallel jobs"
           fi
           
-          # Add optional lib parameter (can be multiple, comma-separated)
+          # Add optional lib parameter (can be multiple, comma-separated) with validation
           if [ -n "${{ github.event.inputs.lib }}" ]; then
             IFS=',' read -ra LIBS <<< "${{ github.event.inputs.lib }}"
             for lib in "${LIBS[@]}"; do
-              CMD="$CMD -l $lib"
+              # Trim whitespace
+              lib=$(echo "$lib" | xargs)
+              # Validate format: package:file
+              if ! [[ "$lib" =~ ^[a-zA-Z0-9._-]+:[a-zA-Z0-9._/-]+$ ]]; then
+                echo "Error: lib format must be package:file (got: $lib)"
+                exit 1
+              fi
+              CMD="$CMD -l $(printf '%q' "$lib")"
               echo "Using shared library: $lib"
             done
           fi
