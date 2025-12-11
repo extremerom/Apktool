@@ -21,7 +21,7 @@ env:
 jobs:
   build-aapt2-and-apktool:
     name: Build aapt2_64 for Linux and Apktool
-    runs-on: aapt
+    runs-on: aapt2
     permissions:
       contents: write
     # This job requires a lot of disk space for AOSP
