@@ -13,6 +13,81 @@ on:
         type: string
         # Note: Ensure only trusted users can trigger this workflow as it creates
         # repositories under the specified username using the TEST token
+      quiet:
+        description: 'Suppress normal output (-q/--quiet)'
+        required: false
+        type: boolean
+        default: false
+      verbose:
+        description: 'Increase output verbosity (-v/--verbose)'
+        required: false
+        type: boolean
+        default: false
+      force:
+        description: 'Force delete destination directory (-f/--force)'
+        required: false
+        type: boolean
+        default: false
+      jobs:
+        description: 'Number of jobs to execute in parallel (-j/--jobs)'
+        required: false
+        type: string
+        default: ''
+      lib:
+        description: 'Use shared library package:file, comma-separated for multiple (-l/--lib)'
+        required: false
+        type: string
+        default: ''
+      no_res:
+        description: 'Do not decode resources (-r/--no-res)'
+        required: false
+        type: boolean
+        default: false
+      no_src:
+        description: 'Do not decode sources (-s/--no-src)'
+        required: false
+        type: boolean
+        default: false
+      only_main_classes:
+        description: 'Only disassemble main dex classes (--only-main-classes)'
+        required: false
+        type: boolean
+        default: false
+      keep_debug_info:
+        description: 'Include debug info in sources (default: disabled with --no-debug-info)'
+        required: false
+        type: boolean
+        default: false
+      only_manifest:
+        description: 'Only decode AndroidManifest.xml (--only-manifest)'
+        required: false
+        type: boolean
+        default: false
+      res_resolve_mode:
+        description: 'Resources resolve mode: remove, dummy, or keep (--res-resolve-mode)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - remove
+          - dummy
+          - keep
+        default: ''
+      keep_broken_res:
+        description: 'Keep broken resources (--keep-broken-res)'
+        required: false
+        type: boolean
+        default: false
+      match_original:
+        description: 'Keep files closest to original (--match-original)'
+        required: false
+        type: boolean
+        default: false
+      no_assets:
+        description: 'Do not decode assets (--no-assets)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   decompile-and-upload:
@@ -105,8 +180,165 @@ jobs:
       - name: Decompile APK
         run: |
           echo "Decompiling APK with dm2q framework..."
-          # Use -J flag to increase Java heap memory to 6GB for large APKs
-          apktool d --no-debug-info -o decompiled -t dm2q -p apktool-frameworks app.apk 
+          # Build apktool command with optional parameters using array
+          # Note: --no-debug-info is controlled by keep_debug_info input
+          CMD=(apktool d -o decompiled -t dm2q -p apktool-frameworks)
+          
+          # Check mutual exclusivity of quiet and verbose flags
+          if [ "${{ github.event.inputs.quiet }}" = "true" ] && [ "${{ github.event.inputs.verbose }}" = "true" ]; then
+            echo "Error: quiet and verbose flags are mutually exclusive"
+            exit 1
+          fi
+          
+          # Add optional quiet flag
+          if [ "${{ github.event.inputs.quiet }}" = "true" ]; then
+            CMD+=(-q)
+            echo "Using quiet mode (-q)"
+          fi
+          
+          # Add optional verbose flag
+          if [ "${{ github.event.inputs.verbose }}" = "true" ]; then
+            CMD+=(-v)
+            echo "Using verbose mode (-v)"
+          fi
+          
+          # Add optional force flag
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            CMD+=(-f)
+            echo "Using force mode (-f)"
+          fi
+          
+          # Add optional jobs parameter with validation
+          if [ -n "${{ github.event.inputs.jobs }}" ]; then
+            # Validate that jobs is a non-negative integer (0 means auto-detect)
+            if ! [[ "${{ github.event.inputs.jobs }}" =~ ^[0-9]+$ ]]; then
+              echo "Error: jobs must be a non-negative integer (0 for auto-detect)"
+              exit 1
+            fi
+            CMD+=(-j "${{ github.event.inputs.jobs }}")
+            if [ "${{ github.event.inputs.jobs }}" = "0" ]; then
+              echo "Using auto-detect for parallel jobs"
+            else
+              echo "Using ${{ github.event.inputs.jobs }} parallel jobs"
+            fi
+          fi
+          
+          # Add optional lib parameter (can be multiple, comma-separated) with validation
+          if [ -n "${{ github.event.inputs.lib }}" ]; then
+            IFS=',' read -ra LIBS <<< "${{ github.event.inputs.lib }}"
+            for lib in "${LIBS[@]}"; do
+              # Trim whitespace
+              lib=$(echo "$lib" | xargs)
+              # Validate format: package:file and prevent path traversal
+              if ! [[ "$lib" =~ ^[a-zA-Z0-9._-]+:[a-zA-Z0-9._/-]+$ ]]; then
+                echo "Error: lib format must be package:file (got: $lib)"
+                exit 1
+              fi
+              # Check for path traversal sequences
+              if [[ "$lib" == *".."* ]]; then
+                echo "Error: lib path cannot contain '..' sequences"
+                exit 1
+              fi
+              CMD+=(-l "$lib")
+              echo "Using shared library: $lib"
+            done
+          fi
+          
+          # Add optional no-resources flag
+          if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+            CMD+=(-r)
+            echo "Skipping resource decoding (-r)"
+          fi
+          
+          # Add optional no-sources flag
+          if [ "${{ github.event.inputs.no_src }}" = "true" ]; then
+            CMD+=(-s)
+            echo "Skipping source decoding (-s)"
+          fi
+          
+          # Add optional only-main-classes flag
+          if [ "${{ github.event.inputs.only_main_classes }}" = "true" ]; then
+            if [ "${{ github.event.inputs.no_src }}" = "true" ]; then
+              echo "Error: only-main-classes conflicts with no-src"
+              exit 1
+            fi
+            CMD+=(--only-main-classes)
+            echo "Only disassembling main dex classes (--only-main-classes)"
+          fi
+          
+          # Add no-debug-info flag (default behavior unless keep_debug_info is true)
+          if [ "${{ github.event.inputs.keep_debug_info }}" != "true" ]; then
+            CMD+=(--no-debug-info)
+            echo "Excluding debug info from sources (--no-debug-info)"
+          else
+            echo "Keeping debug info in sources"
+          fi
+          
+          # Add optional only-manifest flag
+          if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
+            if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+              echo "Error: only-manifest conflicts with no-res"
+              exit 1
+            fi
+            CMD+=(--only-manifest)
+            echo "Only decoding AndroidManifest.xml (--only-manifest)"
+          fi
+          
+          # Add optional res-resolve-mode
+          if [ -n "${{ github.event.inputs.res_resolve_mode }}" ]; then
+            if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+              echo "Error: res-resolve-mode conflicts with no-res"
+              exit 1
+            fi
+            if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
+              echo "Error: res-resolve-mode conflicts with only-manifest"
+              exit 1
+            fi
+            # Validate res_resolve_mode value
+            case "${{ github.event.inputs.res_resolve_mode }}" in
+              remove|dummy|keep)
+                CMD+=(--res-resolve-mode "${{ github.event.inputs.res_resolve_mode }}")
+                echo "Using resource resolve mode: ${{ github.event.inputs.res_resolve_mode }}"
+                ;;
+              *)
+                echo "Error: Invalid res-resolve-mode. Must be 'remove', 'dummy', or 'keep'"
+                exit 1
+                ;;
+            esac
+          fi
+          
+          # Add optional keep-broken-res flag
+          if [ "${{ github.event.inputs.keep_broken_res }}" = "true" ]; then
+            if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+              echo "Error: keep-broken-res conflicts with no-res"
+              exit 1
+            fi
+            if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
+              echo "Error: keep-broken-res conflicts with only-manifest"
+              exit 1
+            fi
+            CMD+=(--keep-broken-res)
+            echo "Keeping broken resources (--keep-broken-res)"
+          fi
+          
+          # Add optional match-original flag
+          if [ "${{ github.event.inputs.match_original }}" = "true" ]; then
+            CMD+=(--match-original)
+            echo "Keeping files closest to original (--match-original)"
+          fi
+          
+          # Add optional no-assets flag
+          if [ "${{ github.event.inputs.no_assets }}" = "true" ]; then
+            CMD+=(--no-assets)
+            echo "Skipping asset decoding (--no-assets)"
+          fi
+          
+          # Add APK file at the end
+          CMD+=(app.apk)
+          
+          echo "Executing: ${CMD[@]}"
+          "${CMD[@]}"
+          
           if [ ! -d decompiled ]; then
             echo "Error: Decompilation failed"
             exit 1

@@ -7,6 +7,76 @@ on:
         description: 'GitHub repository URL with decompiled APK (e.g., https://github.com/username/repo)'
         required: true
         type: string
+      quiet:
+        description: 'Suppress normal output (-q/--quiet)'
+        required: false
+        type: boolean
+        default: false
+      verbose:
+        description: 'Increase output verbosity (-v/--verbose)'
+        required: false
+        type: boolean
+        default: false
+      force:
+        description: 'Skip changes detection and build all files (-f/--force)'
+        required: false
+        type: boolean
+        default: false
+      jobs:
+        description: 'Number of jobs to execute in parallel (-j/--jobs)'
+        required: false
+        type: string
+        default: ''
+      lib:
+        description: 'Use shared library package:file, comma-separated for multiple (-l/--lib)'
+        required: false
+        type: string
+        default: ''
+      no_apk:
+        description: 'Disable repacking into APK (--no-apk)'
+        required: false
+        type: boolean
+        default: false
+      shorten_res_paths:
+        description: 'Shorten resource paths (-srp/--shorten-res-paths)'
+        required: false
+        type: boolean
+        default: false
+      enable_sparse_encoding:
+        description: 'Enable sparse encoding (-ese/--enable-sparse-encoding)'
+        required: false
+        type: boolean
+        default: false
+      collapse_res_names:
+        description: 'Collapse resource names (-crn/--collapse-res-names)'
+        required: false
+        type: boolean
+        default: false
+      no_crunch:
+        description: 'Disable resource file crunching (--no-crunch)'
+        required: false
+        type: boolean
+        default: false
+      copy_original:
+        description: 'Copy original AndroidManifest.xml and META-INF (--copy-original)'
+        required: false
+        type: boolean
+        default: false
+      debuggable:
+        description: 'Set android:debuggable to true (--debuggable)'
+        required: false
+        type: boolean
+        default: false
+      net_sec_conf:
+        description: 'Add network security configuration (--net-sec-conf)'
+        required: false
+        type: boolean
+        default: false
+      aapt:
+        description: 'Path to custom aapt2 binary (--aapt)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   compile-and-sign:
@@ -116,7 +186,141 @@ jobs:
       - name: Compile APK
         run: |
           echo "Compiling APK with dm2q framework..."
-          apktool b decompiled -p apktool-frameworks -o compiled.apk
+          # Build apktool command with optional parameters using array
+          CMD=(apktool b decompiled -p apktool-frameworks -o compiled.apk)
+          
+          # Check mutual exclusivity of quiet and verbose flags
+          if [ "${{ github.event.inputs.quiet }}" = "true" ] && [ "${{ github.event.inputs.verbose }}" = "true" ]; then
+            echo "Error: quiet and verbose flags are mutually exclusive"
+            exit 1
+          fi
+          
+          # Add optional quiet flag
+          if [ "${{ github.event.inputs.quiet }}" = "true" ]; then
+            CMD+=(-q)
+            echo "Using quiet mode (-q)"
+          fi
+          
+          # Add optional verbose flag
+          if [ "${{ github.event.inputs.verbose }}" = "true" ]; then
+            CMD+=(-v)
+            echo "Using verbose mode (-v)"
+          fi
+          
+          # Add optional force flag
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            CMD+=(-f)
+            echo "Using force mode (-f)"
+          fi
+          
+          # Add optional jobs parameter with validation
+          if [ -n "${{ github.event.inputs.jobs }}" ]; then
+            # Validate that jobs is a non-negative integer (0 means auto-detect)
+            if ! [[ "${{ github.event.inputs.jobs }}" =~ ^[0-9]+$ ]]; then
+              echo "Error: jobs must be a non-negative integer (0 for auto-detect)"
+              exit 1
+            fi
+            CMD+=(-j "${{ github.event.inputs.jobs }}")
+            if [ "${{ github.event.inputs.jobs }}" = "0" ]; then
+              echo "Using auto-detect for parallel jobs"
+            else
+              echo "Using ${{ github.event.inputs.jobs }} parallel jobs"
+            fi
+          fi
+          
+          # Add optional lib parameter (can be multiple, comma-separated) with validation
+          if [ -n "${{ github.event.inputs.lib }}" ]; then
+            IFS=',' read -ra LIBS <<< "${{ github.event.inputs.lib }}"
+            for lib in "${LIBS[@]}"; do
+              # Trim whitespace
+              lib=$(echo "$lib" | xargs)
+              # Validate format: package:file and prevent path traversal
+              if ! [[ "$lib" =~ ^[a-zA-Z0-9._-]+:[a-zA-Z0-9._/-]+$ ]]; then
+                echo "Error: lib format must be package:file (got: $lib)"
+                exit 1
+              fi
+              # Check for path traversal sequences
+              if [[ "$lib" == *".."* ]]; then
+                echo "Error: lib path cannot contain '..' sequences"
+                exit 1
+              fi
+              CMD+=(-l "$lib")
+              echo "Using shared library: $lib"
+            done
+          fi
+          
+          # Add optional no-apk flag
+          if [ "${{ github.event.inputs.no_apk }}" = "true" ]; then
+            CMD+=(--no-apk)
+            echo "Disabling APK repacking (--no-apk)"
+          fi
+          
+          # Add optional shorten-res-paths flag
+          if [ "${{ github.event.inputs.shorten_res_paths }}" = "true" ]; then
+            CMD+=(--shorten-res-paths)
+            echo "Shortening resource paths (--shorten-res-paths)"
+          fi
+          
+          # Add optional enable-sparse-encoding flag
+          if [ "${{ github.event.inputs.enable_sparse_encoding }}" = "true" ]; then
+            CMD+=(--enable-sparse-encoding)
+            echo "Enabling sparse encoding (--enable-sparse-encoding)"
+          fi
+          
+          # Add optional collapse-res-names flag
+          if [ "${{ github.event.inputs.collapse_res_names }}" = "true" ]; then
+            CMD+=(--collapse-res-names)
+            echo "Collapsing resource names (--collapse-res-names)"
+          fi
+          
+          # Add optional no-crunch flag
+          if [ "${{ github.event.inputs.no_crunch }}" = "true" ]; then
+            CMD+=(--no-crunch)
+            echo "Disabling resource crunching (--no-crunch)"
+          fi
+          
+          # Add optional copy-original flag
+          if [ "${{ github.event.inputs.copy_original }}" = "true" ]; then
+            CMD+=(--copy-original)
+            echo "Copying original files (--copy-original)"
+          fi
+          
+          # Add optional debuggable flag
+          if [ "${{ github.event.inputs.debuggable }}" = "true" ]; then
+            CMD+=(--debuggable)
+            echo "Setting android:debuggable to true (--debuggable)"
+          fi
+          
+          # Add optional net-sec-conf flag
+          if [ "${{ github.event.inputs.net_sec_conf }}" = "true" ]; then
+            CMD+=(--net-sec-conf)
+            echo "Adding network security configuration (--net-sec-conf)"
+          fi
+          
+          # Add optional aapt parameter with validation
+          if [ -n "${{ github.event.inputs.aapt }}" ]; then
+            # Validate path format and prevent traversal
+            aapt_path="${{ github.event.inputs.aapt }}"
+            if [[ "$aapt_path" == *".."* ]]; then
+              echo "Error: aapt path cannot contain '..' sequences"
+              exit 1
+            fi
+            if [[ "$aapt_path" == /* ]] || [[ "$aapt_path" == ~* ]]; then
+              echo "Error: aapt path must be a relative path"
+              exit 1
+            fi
+            # Allow alphanumeric, dots, underscores, hyphens, slashes, and + for filenames
+            if ! [[ "$aapt_path" =~ ^[a-zA-Z0-9._+/-]+$ ]]; then
+              echo "Error: aapt path contains invalid characters"
+              exit 1
+            fi
+            CMD+=(--aapt "$aapt_path")
+            echo "Using custom aapt2 binary: $aapt_path"
+          fi
+          
+          echo "Executing: ${CMD[@]}"
+          "${CMD[@]}"
+          
           if [ ! -f compiled.apk ]; then
             echo "Error: Compilation failed"
             exit 1
