@@ -13,6 +13,41 @@ on:
         type: string
         # Note: Ensure only trusted users can trigger this workflow as it creates
         # repositories under the specified username using the TEST token
+      quiet:
+        description: 'Suppress normal output (-q/--quiet)'
+        required: false
+        type: boolean
+        default: false
+      verbose:
+        description: 'Increase output verbosity (-v/--verbose)'
+        required: false
+        type: boolean
+        default: false
+      force:
+        description: 'Force delete destination directory (-f/--force)'
+        required: false
+        type: boolean
+        default: false
+      jobs:
+        description: 'Number of jobs to execute in parallel (-j/--jobs)'
+        required: false
+        type: string
+        default: ''
+      lib:
+        description: 'Use shared library package:file, comma-separated for multiple (-l/--lib)'
+        required: false
+        type: string
+        default: ''
+      no_res:
+        description: 'Do not decode resources (-r/--no-res)'
+        required: false
+        type: boolean
+        default: false
+      no_src:
+        description: 'Do not decode sources (-s/--no-src)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   decompile-and-upload:
@@ -105,8 +140,60 @@ jobs:
       - name: Decompile APK
         run: |
           echo "Decompiling APK with dm2q framework..."
-          # Use -J flag to increase Java heap memory to 6GB for large APKs
-          apktool d --no-debug-info -o decompiled -t dm2q -p apktool-frameworks app.apk 
+          # Build apktool command with optional parameters
+          CMD="apktool d --no-debug-info -o decompiled -t dm2q -p apktool-frameworks"
+          
+          # Add optional quiet flag
+          if [ "${{ github.event.inputs.quiet }}" = "true" ]; then
+            CMD="$CMD -q"
+            echo "Using quiet mode (-q)"
+          fi
+          
+          # Add optional verbose flag
+          if [ "${{ github.event.inputs.verbose }}" = "true" ]; then
+            CMD="$CMD -v"
+            echo "Using verbose mode (-v)"
+          fi
+          
+          # Add optional force flag
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            CMD="$CMD -f"
+            echo "Using force mode (-f)"
+          fi
+          
+          # Add optional jobs parameter
+          if [ -n "${{ github.event.inputs.jobs }}" ]; then
+            CMD="$CMD -j ${{ github.event.inputs.jobs }}"
+            echo "Using ${{ github.event.inputs.jobs }} parallel jobs"
+          fi
+          
+          # Add optional lib parameter (can be multiple, comma-separated)
+          if [ -n "${{ github.event.inputs.lib }}" ]; then
+            IFS=',' read -ra LIBS <<< "${{ github.event.inputs.lib }}"
+            for lib in "${LIBS[@]}"; do
+              CMD="$CMD -l $lib"
+              echo "Using shared library: $lib"
+            done
+          fi
+          
+          # Add optional no-resources flag
+          if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+            CMD="$CMD -r"
+            echo "Skipping resource decoding (-r)"
+          fi
+          
+          # Add optional no-sources flag
+          if [ "${{ github.event.inputs.no_src }}" = "true" ]; then
+            CMD="$CMD -s"
+            echo "Skipping source decoding (-s)"
+          fi
+          
+          # Add APK file at the end
+          CMD="$CMD app.apk"
+          
+          echo "Executing: $CMD"
+          eval $CMD
+          
           if [ ! -d decompiled ]; then
             echo "Error: Decompilation failed"
             exit 1

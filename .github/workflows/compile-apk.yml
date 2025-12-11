@@ -7,6 +7,31 @@ on:
         description: 'GitHub repository URL with decompiled APK (e.g., https://github.com/username/repo)'
         required: true
         type: string
+      quiet:
+        description: 'Suppress normal output (-q/--quiet)'
+        required: false
+        type: boolean
+        default: false
+      verbose:
+        description: 'Increase output verbosity (-v/--verbose)'
+        required: false
+        type: boolean
+        default: false
+      force:
+        description: 'Skip changes detection and build all files (-f/--force)'
+        required: false
+        type: boolean
+        default: false
+      jobs:
+        description: 'Number of jobs to execute in parallel (-j/--jobs)'
+        required: false
+        type: string
+        default: ''
+      lib:
+        description: 'Use shared library package:file, comma-separated for multiple (-l/--lib)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   compile-and-sign:
@@ -116,7 +141,45 @@ jobs:
       - name: Compile APK
         run: |
           echo "Compiling APK with dm2q framework..."
-          apktool b decompiled -p apktool-frameworks -o compiled.apk
+          # Build apktool command with optional parameters
+          CMD="apktool b decompiled -p apktool-frameworks -o compiled.apk"
+          
+          # Add optional quiet flag
+          if [ "${{ github.event.inputs.quiet }}" = "true" ]; then
+            CMD="$CMD -q"
+            echo "Using quiet mode (-q)"
+          fi
+          
+          # Add optional verbose flag
+          if [ "${{ github.event.inputs.verbose }}" = "true" ]; then
+            CMD="$CMD -v"
+            echo "Using verbose mode (-v)"
+          fi
+          
+          # Add optional force flag
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            CMD="$CMD -f"
+            echo "Using force mode (-f)"
+          fi
+          
+          # Add optional jobs parameter
+          if [ -n "${{ github.event.inputs.jobs }}" ]; then
+            CMD="$CMD -j ${{ github.event.inputs.jobs }}"
+            echo "Using ${{ github.event.inputs.jobs }} parallel jobs"
+          fi
+          
+          # Add optional lib parameter (can be multiple, comma-separated)
+          if [ -n "${{ github.event.inputs.lib }}" ]; then
+            IFS=',' read -ra LIBS <<< "${{ github.event.inputs.lib }}"
+            for lib in "${LIBS[@]}"; do
+              CMD="$CMD -l $lib"
+              echo "Using shared library: $lib"
+            done
+          fi
+          
+          echo "Executing: $CMD"
+          eval $CMD
+          
           if [ ! -f compiled.apk ]; then
             echo "Error: Compilation failed"
             exit 1
