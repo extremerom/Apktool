@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     # Use a container with more disk space or configure cleanup
     timeout-minutes: 720  # 12 hours max
-    
+
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -131,7 +131,7 @@ jobs:
     name: Build Windows aapt2_64 (cross-compile)
     runs-on: ubuntu-latest
     timeout-minutes: 720
-    
+
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -220,7 +220,7 @@ jobs:
     name: Build macOS aapt2_64
     runs-on: macos-latest
     timeout-minutes: 720
-    
+
     steps:
       - name: Install dependencies
         run: |
@@ -270,7 +270,7 @@ jobs:
           SDK_PATH=$(find /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs -iname "*.sdk" | head -n 1)
           SDK_VERSION=$(basename "$SDK_PATH" .sdk | sed 's/MacOSX//')
           echo "Detected macOS SDK version: $SDK_VERSION"
-          
+
           # Patch darwin_host.go if needed
           if [ -f build/soong/cc/config/darwin_host.go ]; then
             # Add SDK version to supported list if not already present
@@ -318,7 +318,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-linux-aapt2, build-linux-windows-cross, build-macos-aapt2]
     if: always()
-    
+
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v5
@@ -331,25 +331,25 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Build completed for the following platforms:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ -d artifacts/aapt2-linux ]; then
             echo "### Linux Binaries" >> $GITHUB_STEP_SUMMARY
             ls -lh artifacts/aapt2-linux/ >> $GITHUB_STEP_SUMMARY || true
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           if [ -d artifacts/aapt2-windows ]; then
             echo "### Windows Binaries" >> $GITHUB_STEP_SUMMARY
             ls -lh artifacts/aapt2-windows/ >> $GITHUB_STEP_SUMMARY || true
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           if [ -d artifacts/aapt2-macos ]; then
             echo "### macOS Binaries" >> $GITHUB_STEP_SUMMARY
             ls -lh artifacts/aapt2-macos/ >> $GITHUB_STEP_SUMMARY || true
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Note:** Please verify static linking using \`ldd\` (Linux/Windows) and \`otool -L\` (macOS)" >> $GITHUB_STEP_SUMMARY
