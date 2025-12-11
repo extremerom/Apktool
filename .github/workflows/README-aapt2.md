@@ -42,22 +42,25 @@ According to `INTERNAL.md`:
 
 - **AOSP**: Currently using `android-16-release`
 - **Apktool frameworks/base**: Branch naming follows Android version
-  - Older versions use underscore: `apktool_7.1` (for Android 7.1)
-  - Newer versions use hyphen: `apktool-9.0.0` (for Android 9.0 Pie)
-  - Current default: `apktool-9.0.0`
+  - **Naming convention started at Android 7.1** - don't look for older versions
+  - Android 7.1 and newer: Uses naming like `apktool_7.1` or `apktool-9.0.0`
+  - Current default: `apktool-9.0.0` (Android 9.0 Pie)
 
-**Note**: The naming convention changed at Android 7.1. Check the [platform_frameworks_base repository](https://github.com/iBotPeaches/platform_frameworks_base) for available branches.
+**Note**: Check the [platform_frameworks_base repository](https://github.com/iBotPeaches/platform_frameworks_base) for all available branches.
 
 ## Build Process
 
-The workflow performs the following steps for each platform:
+The workflow consists of two main build jobs:
 
-1. **Maximize disk space** (Linux/Windows only)
+### 1. Linux and Windows Build (Single Job)
+According to INTERNAL.md, Linux and Windows binaries are built together in a single AOSP build:
+
+1. **Maximize disk space**
    - Removes unnecessary software to free up disk space
    - Configures swap space
 
 2. **Install dependencies**
-   - Build tools (gcc, make, etc.)
+   - Build tools (gcc, make, mingw-w64 for Windows cross-compilation)
    - Python 3
    - OpenJDK 11
 
@@ -76,23 +79,45 @@ The workflow performs the following steps for each platform:
    - Fetches Apktool's modified frameworks/base
    - Applies changes that disable optimizations and lessen aapt rules
 
+7. **Build aapt2**
+   - Sources build environment
+   - Selects build target with `lunch aosp_cf_x86_64_only_phone-aosp_current-eng`
+   - Compiles aapt2 (produces both Linux and Windows binaries)
+
+8. **Strip binaries**
+   - Removes debug symbols from Linux binaries
+   - Removes debug symbols from Windows binaries
+
+9. **Verify static linking**
+   - Uses `ldd` to check Linux binaries for shared dependencies
+
+10. **Upload artifacts**
+    - Stores Linux binaries (aapt2, aapt2_64)
+    - Stores Windows binaries (aapt2.exe, aapt2_64.exe)
+
+### 2. macOS Build (Separate Job)
+
+1-6. Same as Linux/Windows (without Windows cross-compilation dependencies)
+
 7. **Apply platform-specific patches**
-   - macOS: Adds SDK version to supported list if needed
+   - Detects macOS SDK version
+   - Adds SDK version to supported list in `darwin_host.go`
+   - Validates patch was applied correctly
 
 8. **Build aapt2**
+   - Sets `ANDROID_JAVA_HOME` environment variable
    - Sources build environment
    - Selects build target
-   - Compiles aapt2
+   - Compiles aapt2_64
 
 9. **Strip binaries**
    - Removes debug symbols to reduce size
 
 10. **Verify static linking**
-    - Uses `ldd` (Linux/Windows) or `otool -L` (macOS)
-    - Ensures no shared dependencies
+    - Uses `otool -L` to ensure no shared dependencies
 
 11. **Upload artifacts**
-    - Stores built binaries as workflow artifacts
+    - Stores built aapt2_64 binary
 
 ## Outputs
 

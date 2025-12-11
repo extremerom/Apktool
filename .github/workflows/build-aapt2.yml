@@ -26,8 +26,8 @@ env:
   REPO_INIT_FLAGS: '--depth=1 --partial-clone'
 
 jobs:
-  build-linux-aapt2:
-    name: Build Linux aapt2_64
+  build-linux-windows-aapt2:
+    name: Build Linux and Windows aapt2_64
     runs-on: ubuntu-latest
     # Use a container with more disk space or configure cleanup
     timeout-minutes: 720  # 12 hours max
@@ -52,7 +52,7 @@ jobs:
             zip curl zlib1g-dev libc6-dev-i386 libncurses5 \
             x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev \
             libxml2-utils xsltproc unzip fontconfig python3 python3-pip \
-            openjdk-11-jdk
+            openjdk-11-jdk mingw-w64
 
       - name: Set up repo tool
         run: |
@@ -90,11 +90,12 @@ jobs:
           git fetch apktool ${{ inputs.apktool_branch || 'apktool-9.0.0' }} --depth=1
           git checkout apktool/${{ inputs.apktool_branch || 'apktool-9.0.0' }}
 
-      - name: Build aapt2 for Linux
+      - name: Build aapt2 for Linux and Windows
         run: |
           cd ~/aosp
           source build/envsetup.sh
           lunch aosp_cf_x86_64_only_phone-aosp_current-eng
+          # This single build command produces both Linux and Windows binaries
           m aapt2
 
       - name: Strip Linux binaries
@@ -105,6 +106,16 @@ jobs:
           fi
           if [ -f out/host/linux-x86/bin/aapt2_64 ]; then
             strip out/host/linux-x86/bin/aapt2_64
+          fi
+
+      - name: Strip Windows binaries
+        run: |
+          cd ~/aosp
+          if [ -f out/host/windows-x86/bin/aapt2.exe ]; then
+            strip out/host/windows-x86/bin/aapt2.exe
+          fi
+          if [ -f out/host/windows-x86/bin/aapt2_64.exe ]; then
+            strip out/host/windows-x86/bin/aapt2_64.exe
           fi
 
       - name: Verify static linking (Linux)
@@ -127,86 +138,6 @@ jobs:
             ~/aosp/out/host/linux-x86/bin/aapt2_64
           if-no-files-found: error
 
-  build-linux-windows-cross:
-    name: Build Windows aapt2_64 (cross-compile)
-    runs-on: ubuntu-latest
-    timeout-minutes: 720
-
-    steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@v10
-        with:
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-          root-reserve-mb: 10240
-          temp-reserve-mb: 1024
-          swap-size-mb: 1024
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git-core gnupg flex bison build-essential \
-            zip curl zlib1g-dev libc6-dev-i386 libncurses5 \
-            x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev \
-            libxml2-utils xsltproc unzip fontconfig python3 python3-pip \
-            openjdk-11-jdk mingw-w64
-
-      - name: Set up repo tool
-        run: |
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH
-
-      - name: Configure git
-        run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
-          git config --global color.ui false
-
-      - name: Initialize AOSP repo
-        run: |
-          mkdir -p ~/aosp
-          cd ~/aosp
-          repo init -u https://android.googlesource.com/platform/manifest \
-            -b ${{ inputs.android_branch || 'android-16-release' }} \
-            ${{ env.REPO_INIT_FLAGS }}
-
-      - name: Sync AOSP sources
-        run: |
-          cd ~/aosp
-          repo sync -c -j$(nproc) --no-tags --no-clone-bundle frameworks/base \
-            build/make build/soong prebuilts/build-tools \
-            external/libcxx external/zlib \
-            system/core system/logging
-
-      - name: Checkout modified frameworks/base
-        run: |
-          cd ~/aosp/frameworks/base
-          git remote add apktool https://github.com/iBotPeaches/platform_frameworks_base.git
-          git fetch apktool ${{ inputs.apktool_branch || 'apktool-9.0.0' }} --depth=1
-          git checkout apktool/${{ inputs.apktool_branch || 'apktool-9.0.0' }}
-
-      - name: Build aapt2 for Windows
-        run: |
-          cd ~/aosp
-          source build/envsetup.sh
-          lunch aosp_cf_x86_64_only_phone-aosp_current-eng
-          m aapt2
-
-      - name: Strip Windows binaries
-        run: |
-          cd ~/aosp
-          if [ -f out/host/windows-x86/bin/aapt2.exe ]; then
-            strip out/host/windows-x86/bin/aapt2.exe
-          fi
-          if [ -f out/host/windows-x86/bin/aapt2_64.exe ]; then
-            strip out/host/windows-x86/bin/aapt2_64.exe
-          fi
-
       - name: Upload Windows aapt2 artifacts
         uses: actions/upload-artifact@v5
         with:
@@ -214,7 +145,7 @@ jobs:
           path: |
             ~/aosp/out/host/windows-x86/bin/aapt2.exe
             ~/aosp/out/host/windows-x86/bin/aapt2_64.exe
-          if-no-files-found: warn
+          if-no-files-found: error
 
   build-macos-aapt2:
     name: Build macOS aapt2_64
@@ -285,9 +216,18 @@ jobs:
                   /darwinSupportedSdkVersions.*=.*\[/ { print; getline; print "\t\t\"" sdk "\","; print; next }
                   { print }
                 ' build/soong/cc/config/darwin_host.go.bak > build/soong/cc/config/darwin_host.go
+                # Verify the patch was applied
+                if grep -q "\"$SDK_VERSION\"" build/soong/cc/config/darwin_host.go; then
+                  echo "✓ SDK version successfully added"
+                else
+                  echo "⚠ Warning: Failed to add SDK version, build may fail"
+                  echo "Please check build/soong/cc/config/darwin_host.go format"
+                fi
               else
                 echo "SDK version $SDK_VERSION already in supported list"
               fi
+            else
+              echo "Warning: darwin_host.go not found at expected location"
             fi
           else
             echo "Warning: Could not detect macOS SDK, build may fail"
@@ -327,7 +267,7 @@ jobs:
   create-release-summary:
     name: Create Build Summary
     runs-on: ubuntu-latest
-    needs: [build-linux-aapt2, build-linux-windows-cross, build-macos-aapt2]
+    needs: [build-linux-windows-aapt2, build-macos-aapt2]
     if: always()
 
     steps:
