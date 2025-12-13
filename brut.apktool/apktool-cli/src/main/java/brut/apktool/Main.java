@@ -119,7 +119,7 @@ public class Main {
     private static final Option decodeResResolveModeOption = Option.builder()
         .longOpt("res-resolve-mode")
         .desc("Set the resolve mode for resources to <mode>.\n"
-            + "Possible values are: 'remove' (default), 'dummy' or 'keep'.")
+            + "Possible values are: 'keep' (default), 'remove' or 'dummy'.")
         .hasArg()
         .argName("mode")
         .build();
@@ -475,18 +475,18 @@ public class Main {
             } else {
                 String mode = cli.getOptionValue(decodeResResolveModeOption);
                 switch (mode) {
+                    case "keep":
+                        config.setDecodeResolve(Config.DecodeResolve.KEEP);
+                        break;
                     case "remove":
                         config.setDecodeResolve(Config.DecodeResolve.REMOVE);
                         break;
                     case "dummy":
                         config.setDecodeResolve(Config.DecodeResolve.DUMMY);
                         break;
-                    case "keep":
-                        config.setDecodeResolve(Config.DecodeResolve.KEEP);
-                        break;
                     default:
                         System.err.println("Unknown resolve resources mode: " + mode);
-                        System.err.println("Expect: 'remove', 'dummy' or 'keep'.");
+                        System.err.println("Expect: 'keep', 'remove' or 'dummy'.");
                         System.exit(1);
                         return;
                 }
