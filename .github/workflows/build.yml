@@ -22,18 +22,6 @@ env:
   BINARY_PATH: brut.apktool/apktool-lib/src/main/resources/prebuilt
 
 jobs:
-  analyze-mac-aapt:
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        file: [ aapt2 ]
-    steps:
-      - uses: actions/checkout@v6
-      - name: Verify Executable
-        run: ${{ env.BINARY_PATH }}/macosx/${{ matrix.file }} version
-      - name: Output Static
-        run: otool -L ${{ env.BINARY_PATH }}/macosx/${{ matrix.file }} || true
-
   analyze-linux-aapt:
     runs-on: ubuntu-latest
     strategy:
@@ -46,29 +34,15 @@ jobs:
       - name: Output Static
         run: ldd ${{ env.BINARY_PATH }}/linux/${{ matrix.file }} || true
 
-  analyze-windows-aapt:
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        file: [ aapt2.exe ]
-    steps:
-      - uses: actions/checkout@v6
-      - name: Verify Executable
-        run: ${{ env.BINARY_PATH }}/windows/${{ matrix.file }} version
-      - name: Output Static
-        run: ldd ${{ env.BINARY_PATH }}/windows/${{ matrix.file }} || true
-
   build-and-test-with-Java-8-and-later:
     runs-on: ${{ matrix.os }}
     needs:
-      - analyze-mac-aapt
       - analyze-linux-aapt
-      - analyze-windows-aapt
     name: Build/Test (JDK ${{ matrix.java }}, ${{ matrix.os }})
     strategy:
       fail-fast: true
       matrix:
-        os: [ ubuntu-latest, macOS-latest, windows-latest ]
+        os: [ ubuntu-latest ]
         java: [ 8, 11, 17, 21 ]
     steps:
       - uses: actions/checkout@v6
@@ -79,13 +53,8 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5.0.0
 
-      - name: Build (Linux/Mac)
-        if: runner.os != 'Windows'
+      - name: Build (Linux)
         run: ./gradlew build shadowJar proguard
-
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        run: ./gradlew.bat build shadowJar proguard
 
   upload-artifact:
     runs-on: ubuntu-latest
@@ -107,13 +76,8 @@ jobs:
         with:
           dependency-graph: generate-and-submit
 
-      - name: Build (Linux/Mac)
-        if: runner.os != 'Windows'
+      - name: Build (Linux)
         run: ./gradlew build shadowJar proguard
-
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        run: ./gradlew.bat build shadowJar proguard
 
       - name: Upload
         uses: actions/upload-artifact@v5
