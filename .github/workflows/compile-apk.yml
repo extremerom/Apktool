@@ -107,34 +107,43 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5.0.0
-
-      - name: Build apktool
-        run: ./gradlew build shadowJar proguard
-
-      - name: Setup apktool script
+      - name: Download apktool from latest release
         run: |
-          # Find the built apktool jar (the proguard output, excluding other jars)
-          JAR_PATH=$(find brut.apktool/apktool-cli/build/libs -name "apktool-*.jar" -not -name "*-sources.jar" -not -name "*-javadoc.jar" -not -name "*-all.jar" | head -n 1)
-          if [ -z "$JAR_PATH" ]; then
-            echo "Error: Could not find apktool jar"
+          echo "Downloading apktool.jar and script from latest release..."
+          
+          # Get the latest release info
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest)
+          
+          # Extract download URLs using jq for reliable JSON parsing
+          JAR_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name | endswith(".jar")) | .browser_download_url' | head -1)
+          SCRIPT_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name == "apktool") | .browser_download_url' | head -1)
+          
+          if [ -z "$JAR_URL" ] || [ -z "$SCRIPT_URL" ]; then
+            echo "Error: Could not find apktool.jar or script in latest release"
+            echo "JAR_URL: $JAR_URL"
+            echo "SCRIPT_URL: $SCRIPT_URL"
             exit 1
           fi
-          echo "Found apktool jar at: $JAR_PATH"
-
-          # Copy the jar to the script directory and rename it
-          cp "$JAR_PATH" scripts/linux/apktool.jar
-
-          # Make the apktool script executable
-          chmod +x scripts/linux/apktool
-
-          # Add the script directory to PATH
-          echo "$GITHUB_WORKSPACE/scripts/linux" >> $GITHUB_PATH
-
+          
+          echo "Downloading apktool.jar from: $JAR_URL"
+          echo "Downloading apktool script from: $SCRIPT_URL"
+          
+          # Create directory for apktool
+          mkdir -p apktool-bin
+          
+          # Download files
+          curl -L -o apktool-bin/apktool.jar "$JAR_URL"
+          curl -L -o apktool-bin/apktool "$SCRIPT_URL"
+          
+          # Make the script executable
+          chmod +x apktool-bin/apktool
+          
+          # Add to PATH
+          echo "$GITHUB_WORKSPACE/apktool-bin" >> $GITHUB_PATH
+          
           # Verify setup
-          ls -la scripts/linux/
-          echo "Apktool script configured in PATH"
+          ls -la apktool-bin/
+          echo "Apktool downloaded and configured in PATH"
 
       - name: Download Samsung framework
         run: |

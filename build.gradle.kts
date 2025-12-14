@@ -166,6 +166,12 @@ task("release") {
     // Used for official releases.
 }
 
+tasks.register("printVersion") {
+    doLast {
+        println(apktoolVersion)
+    }
+}
+
 tasks.wrapper {
     distributionType = Wrapper.DistributionType.ALL
 }
