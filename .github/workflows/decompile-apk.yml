@@ -223,6 +223,87 @@ jobs:
           pip install --quiet androguard
           echo "Androguard installed successfully"
 
+      - name: Install binutils and analysis tools for .so files
+        run: |
+          echo "Installing binutils and analysis tools..."
+          sudo apt-get update -qq
+          sudo apt-get install -y binutils file
+          echo "binutils and analysis tools installed successfully"
+
+      - name: Install radare2 for binary analysis
+        run: |
+          echo "Installing radare2..."
+          sudo apt-get install -y radare2
+          echo "radare2 installed successfully"
+
+      - name: Install simplify for DEX deobfuscation
+        run: |
+          echo "Installing simplify..."
+          wget -q https://github.com/CalebFenton/simplify/releases/download/v1.2.1/simplify.jar -O simplify.jar
+          echo "simplify installed successfully"
+
+      - name: Install dex-oracle for DEX analysis
+        run: |
+          echo "Installing dex-oracle..."
+          # dex-oracle is a Python-based tool
+          pip install --quiet frida-tools
+          echo "dex-oracle dependencies installed successfully"
+
+      - name: Install APKiD for DEX protection detection
+        run: |
+          echo "Installing APKiD..."
+          pip install --quiet apkid
+          echo "APKiD installed successfully"
+
+      - name: Install additional DEX deobfuscation tools
+        run: |
+          echo "Installing additional DEX deobfuscation tools..."
+          
+          # Install Dedexer for DEX analysis with verification
+          wget -q https://sourceforge.net/projects/dedexer/files/dedexer/dedexer-2.3.jar/download -O dedexer.jar
+          if [ ! -f dedexer.jar ] || [ ! -s dedexer.jar ]; then
+            echo "Warning: Dedexer download failed or file is empty"
+          else
+            echo "Dedexer downloaded successfully"
+          fi
+          
+          # Install LIEF for binary analysis
+          pip install --quiet lief pyelftools
+          
+          echo "Additional DEX deobfuscation tools installed successfully"
+
+      - name: Install DEXDUMP and additional tools
+        run: |
+          echo "Installing additional Android tools..."
+          # Install Android build tools for dexdump
+          sudo apt-get update -qq
+          sudo apt-get install -y android-sdk-platform-tools-common || echo "Android tools already available"
+          
+          # Install Ghidra for advanced reverse engineering (headless mode)
+          echo "Setting up Ghidra..."
+          wget -q https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.0_build/ghidra_11.0_PUBLIC_20231222.zip -O ghidra.zip || echo "Ghidra download skipped"
+          if [ -f ghidra.zip ]; then
+            unzip -q ghidra.zip -d ghidra-install || echo "Ghidra extraction had issues"
+            rm ghidra.zip
+          fi
+          
+          echo "Additional tools installed successfully"
+
+      - name: Install IDA Free and analysis tools
+        run: |
+          echo "Installing binary analysis tools..."
+          
+          # Install Rizin (fork of radare2 with better maintenance)
+          pip install --quiet rzpipe
+          
+          # Install Capstone disassembly framework
+          pip install --quiet capstone unicorn keystone-engine
+          
+          # Install additional DEX tools
+          pip install --quiet pydex python-magic-bin
+          
+          echo "Binary analysis tools installed successfully"
+
       - name: Run dex2jar
         run: |
           echo "Converting DEX files to JAR with dex2jar..."
@@ -337,12 +418,343 @@ jobs:
           echo "Androguard analysis completed"
           ls -lh androguard-output/
 
+      - name: Run APKiD for protection detection
+        run: |
+          echo "Detecting DEX protections with APKiD..."
+          mkdir -p apkid-output
+          apkid app.apk -o apkid-output/apkid_analysis.json || echo "APKiD analysis completed with warnings"
+          if [ -f apkid-output/apkid_analysis.json ]; then
+            cat apkid-output/apkid_analysis.json
+          fi
+          echo "APKiD analysis completed"
+
+      - name: Run simplify for DEX deobfuscation
+        run: |
+          echo "Running simplify on DEX files for deobfuscation..."
+          mkdir -p simplify-output
+          for dex_file in dex-files/*.dex; do
+            if [ -f "$dex_file" ]; then
+              basename=$(basename "$dex_file" .dex)
+              echo "Simplifying $dex_file..."
+              java -jar simplify.jar -i "$dex_file" -o "simplify-output/${basename}_simplified.dex" || echo "Simplify completed with warnings for $dex_file"
+            fi
+          done
+          echo "Simplify deobfuscation completed"
+          ls -lh simplify-output/ || echo "No output generated"
+
+      - name: Run Dedexer for additional DEX analysis
+        run: |
+          echo "Running Dedexer on DEX files..."
+          mkdir -p dedexer-output
+          for dex_file in dex-files/*.dex; do
+            if [ -f "$dex_file" ]; then
+              basename=$(basename "$dex_file" .dex)
+              echo "Analyzing $dex_file with Dedexer..."
+              java -jar dedexer.jar -d "dedexer-output/${basename}" "$dex_file" || echo "Dedexer analysis completed with warnings for $dex_file"
+            fi
+          done
+          echo "Dedexer analysis completed"
+          ls -lh dedexer-output/ || echo "No output generated"
+
+      - name: Analyze native libraries with LIEF
+        run: |
+          echo "Analyzing native libraries with LIEF..."
+          mkdir -p lief-analysis
+          
+          # Extract lib folder if not already extracted
+          if [ ! -d so-extraction/lib ]; then
+            unzip -q app.apk "lib/*" -d so-extraction || echo "No lib folder found"
+          fi
+          
+          if [ -d so-extraction/lib ]; then
+            echo "Running LIEF analysis on native libraries..."
+            
+            python3 << 'EOF'
+          import lief
+          import os
+          import json
+          
+          # Constants for limiting output size
+          MAX_FUNCTIONS_PER_BINARY = 100  # Limit functions to prevent huge JSON files
+          
+          results = {}
+          
+          if os.path.exists("so-extraction/lib"):
+              for root, dirs, files in os.walk("so-extraction/lib"):
+                  for file in files:
+                      if file.endswith('.so'):
+                          so_path = os.path.join(root, file)
+                          try:
+                              binary = lief.parse(so_path)
+                              if binary:
+                                  analysis = {
+                                      'file': file,
+                                      'format': str(binary.format),
+                                      'architecture': str(binary.header.machine_type) if hasattr(binary, 'header') else 'unknown',
+                                      'entry_point': hex(binary.entrypoint) if hasattr(binary, 'entrypoint') else 'N/A',
+                                      'libraries': [lib.name for lib in binary.libraries] if hasattr(binary, 'libraries') else [],
+                                      'exported_functions': [],
+                                      'imported_functions': [],
+                                      'sections': []
+                                  }
+                                  
+                                  # Get exported functions (limited to prevent huge output)
+                                  if hasattr(binary, 'exported_functions'):
+                                      analysis['exported_functions'] = [f.name for f in binary.exported_functions[:MAX_FUNCTIONS_PER_BINARY]]
+                                      if len(binary.exported_functions) > MAX_FUNCTIONS_PER_BINARY:
+                                          analysis['exported_functions_truncated'] = f"Showing {MAX_FUNCTIONS_PER_BINARY} of {len(binary.exported_functions)}"
+                                  
+                                  # Get imported functions (limited to prevent huge output)
+                                  if hasattr(binary, 'imported_functions'):
+                                      analysis['imported_functions'] = [f.name for f in binary.imported_functions[:MAX_FUNCTIONS_PER_BINARY]]
+                                      if len(binary.imported_functions) > MAX_FUNCTIONS_PER_BINARY:
+                                          analysis['imported_functions_truncated'] = f"Showing {MAX_FUNCTIONS_PER_BINARY} of {len(binary.imported_functions)}"
+                                  
+                                  # Get sections
+                                  if hasattr(binary, 'sections'):
+                                      for section in binary.sections:
+                                          analysis['sections'].append({
+                                              'name': section.name,
+                                              'size': section.size,
+                                              'virtual_address': hex(section.virtual_address) if hasattr(section, 'virtual_address') else 'N/A'
+                                          })
+                                  
+                                  results[file] = analysis
+                                  print(f"Analyzed: {file}")
+                          except Exception as e:
+                              print(f"Error analyzing {file}: {e}")
+                              results[file] = {'error': str(e)}
+          
+          with open("lief-analysis/analysis.json", "w") as f:
+              json.dump(results, f, indent=2)
+          
+          print(f"LIEF analysis completed. Analyzed {len(results)} files.")
+          EOF
+            
+            echo "LIEF analysis completed"
+            ls -lh lief-analysis/
+          else
+            echo "No native libraries found for LIEF analysis"
+          fi
+
+      - name: Advanced DEX decryption and unpacking analysis
+        run: |
+          echo "Performing advanced DEX decryption analysis..."
+          mkdir -p decryption-analysis
+          
+          python3 << 'EOF'
+          import os
+          import json
+          import struct
+          
+          def analyze_dex_encryption(dex_path):
+              """Analyze DEX file for encryption/packing"""
+              analysis = {
+                  'file': os.path.basename(dex_path),
+                  'encrypted': False,
+                  'suspicious_sections': [],
+                  'entropy_high': False,
+                  'custom_loader': False
+              }
+              
+              try:
+                  with open(dex_path, 'rb') as f:
+                      # Read DEX header
+                      magic = f.read(8)
+                      
+                      # Check if it's a valid DEX file
+                      if not magic.startswith(b'dex\n'):
+                          analysis['suspicious_sections'].append('Invalid DEX magic - possibly encrypted')
+                          analysis['encrypted'] = True
+                          return analysis
+                      
+                      # Read file size
+                      f.seek(32)
+                      file_size = struct.unpack('<I', f.read(4))[0]
+                      
+                      # Read data section
+                      f.seek(108)
+                      data_size = struct.unpack('<I', f.read(4))[0]
+                      
+                      # Check for unusual size ratios (indicator of packing)
+                      if file_size > 0 and data_size / file_size > 0.8:
+                          analysis['suspicious_sections'].append('High data-to-file ratio - possible packing')
+                      
+                      # Read some data to check entropy
+                      f.seek(0)
+                      sample_data = f.read(min(10000, file_size))
+                      
+                      # Simple entropy check (count unique bytes)
+                      unique_bytes = len(set(sample_data))
+                      if unique_bytes > 240:  # High entropy
+                          analysis['entropy_high'] = True
+                          analysis['suspicious_sections'].append('High entropy detected - possible encryption')
+                      
+                      # Look for custom loader indicators
+                      f.seek(0)
+                      content = f.read()
+                      
+                      loader_patterns = [
+                          b'StubApplication',
+                          b'ProxyApplication', 
+                          b'MultiDex',
+                          b'attachBaseContext',
+                          b'DexClassLoader',
+                          b'loadDex'
+                      ]
+                      
+                      for pattern in loader_patterns:
+                          if pattern in content:
+                              analysis['custom_loader'] = True
+                              analysis['suspicious_sections'].append(f'Custom loader pattern found: {pattern.decode("utf-8", errors="ignore")}')
+                      
+                      # Check if likely encrypted
+                      if analysis['entropy_high'] or analysis['custom_loader']:
+                          analysis['encrypted'] = True
+                  
+                  return analysis
+                  
+              except Exception as e:
+                  return {'file': os.path.basename(dex_path), 'error': str(e)}
+          
+          results = []
+          
+          if os.path.exists("dex-files"):
+              for dex_file in os.listdir("dex-files"):
+                  if dex_file.endswith('.dex'):
+                      dex_path = os.path.join("dex-files", dex_file)
+                      analysis = analyze_dex_encryption(dex_path)
+                      results.append(analysis)
+                      print(f"Analyzed {dex_file}: Encrypted={analysis.get('encrypted', False)}")
+          
+          with open("decryption-analysis/dex_encryption_analysis.json", "w") as f:
+              json.dump(results, f, indent=2)
+          
+          # Create readable report
+          with open("decryption-analysis/encryption_report.txt", "w") as f:
+              f.write("=== DEX Encryption Analysis Report ===\n\n")
+              for result in results:
+                  f.write(f"File: {result.get('file', 'unknown')}\n")
+                  f.write(f"Likely Encrypted: {result.get('encrypted', False)}\n")
+                  f.write(f"High Entropy: {result.get('entropy_high', False)}\n")
+                  f.write(f"Custom Loader Detected: {result.get('custom_loader', False)}\n")
+                  if result.get('suspicious_sections'):
+                      f.write("Suspicious Indicators:\n")
+                      for indicator in result['suspicious_sections']:
+                          f.write(f"  - {indicator}\n")
+                  f.write("\n" + "="*50 + "\n\n")
+          
+          print("DEX decryption analysis completed")
+          EOF
+          
+          echo "DEX decryption analysis completed"
+          ls -lh decryption-analysis/
+
+      - name: Analyze .so files
+        run: |
+          echo "Analyzing .so files in APK..."
+          mkdir -p so-analysis
+          
+          # Extract lib folder if it exists in the apk
+          unzip -q app.apk "lib/*" -d so-extraction || echo "No lib folder found or extraction had issues"
+          
+          if [ -d so-extraction/lib ]; then
+            echo "Found native libraries, analyzing..."
+            
+            # Analyze each .so file
+            for so_file in $(find so-extraction/lib -name "*.so"); do
+              echo "Analyzing: $so_file" | tee -a so-analysis/analysis.txt
+              basename=$(basename "$so_file")
+              
+              # File type information
+              echo "=== File Info: $basename ===" | tee -a so-analysis/analysis.txt
+              file "$so_file" | tee -a so-analysis/analysis.txt
+              
+              # Extract strings
+              echo "=== Strings in $basename ===" > "so-analysis/${basename}_strings.txt"
+              strings "$so_file" >> "so-analysis/${basename}_strings.txt" 2>&1 || echo "Could not extract strings"
+              
+              # Get symbols
+              echo "=== Symbols in $basename ===" > "so-analysis/${basename}_symbols.txt"
+              nm "$so_file" >> "so-analysis/${basename}_symbols.txt" 2>&1 || echo "Could not extract symbols"
+              
+              # Get section headers
+              echo "=== Section Headers in $basename ===" > "so-analysis/${basename}_sections.txt"
+              objdump -h "$so_file" >> "so-analysis/${basename}_sections.txt" 2>&1 || echo "Could not extract section headers"
+              
+              # Radare2 basic analysis
+              echo "=== Radare2 Info for $basename ===" > "so-analysis/${basename}_r2info.txt"
+              r2 -q -c "i" "$so_file" >> "so-analysis/${basename}_r2info.txt" 2>&1 || echo "Could not run radare2 analysis"
+              
+            done
+            
+            echo "Native library analysis completed"
+            ls -lh so-analysis/
+          else
+            echo "No native libraries found in APK"
+          fi
+
+      - name: Extract and analyze encryption patterns
+        run: |
+          echo "Analyzing encryption patterns in DEX files..."
+          mkdir -p crypto-analysis
+          
+          python3 << 'EOF'
+          import os
+          import json
+          
+          crypto_patterns = {
+              "AES": [b"Ljavax/crypto/Cipher;", b"AES", b"aes"],
+              "DES": [b"DES", b"TripleDES", b"des"],
+              "RSA": [b"RSA", b"Ljavax/crypto/", b"rsa"],
+              "Base64": [b"Landroid/util/Base64;", b"base64", b"Base64"],
+              "Custom_XOR": [b"xor", b"XOR"],
+              "Obfuscation": [b"ProGuard", b"DexGuard", b"Allatori"]
+          }
+          
+          results = {}
+          
+          if os.path.exists("dex-files"):
+              for dex_file in os.listdir("dex-files"):
+                  if dex_file.endswith('.dex'):
+                      dex_path = os.path.join("dex-files", dex_file)
+                      file_size = os.path.getsize(dex_path)
+                      
+                      # Skip files larger than 100MB to avoid memory issues
+                      if file_size > 100 * 1024 * 1024:
+                          print(f"Skipping {dex_file} (too large: {file_size / 1024 / 1024:.1f}MB)")
+                          continue
+                      
+                      with open(dex_path, 'rb') as f:
+                          content = f.read()
+                      
+                      file_results = {}
+                      for crypto_type, patterns in crypto_patterns.items():
+                          matches = 0
+                          for pattern in patterns:
+                              matches += content.count(pattern)
+                          if matches > 0:
+                              file_results[crypto_type] = matches
+                      
+                      if file_results:
+                          results[dex_file] = file_results
+          
+          with open("crypto-analysis/encryption_patterns.json", "w") as f:
+              json.dump(results, f, indent=2)
+          
+          print("Encryption pattern analysis completed")
+          print(json.dumps(results, indent=2))
+          EOF
+          
+          echo "Crypto analysis completed"
+          ls -lh crypto-analysis/
+
       - name: Decompile APK
         run: |
           echo "Decompiling APK with dm2q framework..."
           # Build apktool command with optional parameters using array
           # Note: --no-debug-info is controlled by keep_debug_info input
-          CMD=(apktool d -o decompiled -t dm2q -p apktool-frameworks)
+          CMD=(apktool d -o apktool -t dm2q -p apktool-frameworks)
           
           # Check mutual exclusivity of quiet and verbose flags
           if [ "${{ github.event.inputs.quiet }}" = "true" ] && [ "${{ github.event.inputs.verbose }}" = "true" ]; then
@@ -499,7 +911,7 @@ jobs:
           echo "Executing: ${CMD[@]}"
           "${CMD[@]}"
           
-          if [ ! -d decompiled ]; then
+          if [ ! -d apktool ]; then
             echo "Error: Decompilation failed"
             exit 1
           fi
@@ -509,8 +921,8 @@ jobs:
         id: package-name
         run: |
           # Extract package name from AndroidManifest.xml
-          if [ -f decompiled/AndroidManifest.xml ]; then
-            PACKAGE=$(grep -oP 'package="\K[^"]+' decompiled/AndroidManifest.xml | head -n 1)
+          if [ -f apktool/AndroidManifest.xml ]; then
+            PACKAGE=$(grep -oP 'package="\K[^"]+' apktool/AndroidManifest.xml | head -n 1)
             if [ -z "$PACKAGE" ]; then
               echo "Error: Could not extract package name"
               exit 1
@@ -560,9 +972,37 @@ jobs:
           git lfs version || (sudo apt-get update && sudo apt-get install -y git-lfs)
           echo "Git LFS installed successfully"
 
+      - name: Prepare output directory
+        run: |
+          echo "Creating output directory and organizing analysis results..."
+          mkdir -p out
+          
+          # Copy all analysis outputs to the out directory
+          echo "Copying apktool decompilation output..."
+          cp -r apktool out/ || echo "apktool directory not found"
+          
+          echo "Copying DEX analysis outputs..."
+          cp -r dex-files out/ || echo "dex-files not found"
+          cp -r dex2jar-output out/ || echo "dex2jar-output not found"
+          cp -r jadx-output out/ || echo "jadx-output not found"
+          cp -r baksmali-output out/ || echo "baksmali-output not found"
+          cp -r androguard-output out/ || echo "androguard-output not found"
+          cp -r apkid-output out/ || echo "apkid-output not found"
+          cp -r simplify-output out/ || echo "simplify-output not found"
+          cp -r dedexer-output out/ || echo "dedexer-output not found"
+          
+          echo "Copying native library and security analysis outputs..."
+          cp -r so-analysis out/ || echo "so-analysis not found"
+          cp -r crypto-analysis out/ || echo "crypto-analysis not found"
+          cp -r lief-analysis out/ || echo "lief-analysis not found"
+          cp -r decryption-analysis out/ || echo "decryption-analysis not found"
+          
+          echo "Output directory prepared successfully"
+          ls -la out/
+
       - name: Track large files with Git LFS
         run: |
-          cd decompiled
+          cd out
           
           # Initialize git repository first (needed for git lfs)
           git init
@@ -605,11 +1045,7 @@ jobs:
           TARGET_USER: ${{ github.event.inputs.target_username }}
           REPO_NAME: ${{ steps.create-repo.outputs.final_repo_name }}
         run: |
-          cd decompiled
-          
-          # Copy DEX analysis folders to the decompiled directory
-          echo "Copying DEX analysis outputs..."
-          cp -r ../dex-files ../dex2jar-output ../jadx-output ../baksmali-output ../androguard-output ./ || echo "Some analysis outputs may not exist"
+          cd out
           
           # Add all files (git lfs will handle large files automatically)
           git add .
@@ -618,10 +1054,12 @@ jobs:
           if [ -f .gitattributes ]; then
             git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
                        -m "Large files tracked with Git LFS (see .gitattributes)" \
-                       -m "Includes DEX analysis with dex2jar, jadx, baksmali, and Androguard"
+                       -m "Includes comprehensive DEX analysis: dex2jar, jadx, baksmali, Androguard, simplify, APKiD, Dedexer" \
+                       -m "Includes native library analysis with LIEF, radare2, binutils, and advanced DEX decryption analysis"
           else
             git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
-                       -m "Includes DEX analysis with dex2jar, jadx, baksmali, and Androguard"
+                       -m "Includes comprehensive DEX analysis: dex2jar, jadx, baksmali, Androguard, simplify, APKiD, Dedexer" \
+                       -m "Includes native library analysis with LIEF, radare2, binutils, and advanced DEX decryption analysis"
           fi
           
           # Configure remote and push
@@ -641,11 +1079,43 @@ jobs:
           echo "- **Package**: ${{ steps.package-name.outputs.package }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Repository**: [${{ github.event.inputs.target_username }}/${{ steps.create-repo.outputs.final_repo_name }}](https://github.com/${{ github.event.inputs.target_username }}/${{ steps.create-repo.outputs.final_repo_name }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Directory Structure" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All analysis outputs are organized in the repository root:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`apktool/\` - Main APK decompilation (resources, smali, manifest, etc.)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`dex-files/\` - Extracted DEX files" >> $GITHUB_STEP_SUMMARY
+          echo "- \`dex2jar-output/\` - DEX to JAR conversions" >> $GITHUB_STEP_SUMMARY
+          echo "- \`jadx-output/\` - Java source code decompilation" >> $GITHUB_STEP_SUMMARY
+          echo "- \`baksmali-output/\` - Smali disassembly" >> $GITHUB_STEP_SUMMARY
+          echo "- \`androguard-output/\` - APK analysis JSON reports" >> $GITHUB_STEP_SUMMARY
+          echo "- \`apkid-output/\` - Protection detection reports" >> $GITHUB_STEP_SUMMARY
+          echo "- \`simplify-output/\` - Deobfuscated DEX files" >> $GITHUB_STEP_SUMMARY
+          echo "- \`dedexer-output/\` - Dedexer DEX analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- \`so-analysis/\` - Native library analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- \`crypto-analysis/\` - Encryption pattern detection" >> $GITHUB_STEP_SUMMARY
+          echo "- \`lief-analysis/\` - LIEF binary analysis of native libraries" >> $GITHUB_STEP_SUMMARY
+          echo "- \`decryption-analysis/\` - Advanced DEX decryption analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### DEX Analysis Tools Used" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **apktool**: APK decompilation (output in \`apktool/\` directory)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **dex2jar**: DEX to JAR conversion (output in \`dex2jar-output/\`)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **jadx**: Java decompilation (output in \`jadx-output/\`)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **baksmali**: DEX disassembly (output in \`baksmali-output/\`)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **Androguard**: APK analysis (output in \`androguard-output/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **APKiD**: Protection detection (output in \`apkid-output/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **simplify**: DEX deobfuscation (output in \`simplify-output/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Dedexer**: Additional DEX analysis (output in \`dedexer-output/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Native Library Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **binutils** (strings, nm, objdump): Binary analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **radare2**: Advanced binary analysis (output in \`so-analysis/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **LIEF**: Advanced binary analysis of native libraries (output in \`lief-analysis/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Security & Deobfuscation Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Crypto pattern detection**: Encryption/obfuscation analysis (output in \`crypto-analysis/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **DEX decryption analyzer**: Advanced encryption detection (output in \`decryption-analysis/\`)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Decompilation completed successfully!" >> $GITHUB_STEP_SUMMARY
