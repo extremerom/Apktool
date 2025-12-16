@@ -190,7 +190,7 @@ jobs:
         run: |
           echo "Extracting DEX files from APK..."
           mkdir -p dex-files
-          apktool d --no-src --keep-broken-res -t dm2q -p apktool-frameworks -o dex-files
+          apktool d --no-src --keep-broken-res -t dm2q -p apktool-frameworks -o dex-files app.apk
 
       - name: Install dex2jar
         run: |
