@@ -191,7 +191,7 @@ jobs:
           echo "Extracting DEX files from APK..."
           mkdir -p dex-files
           unzip -j app.apk '*.dex' -d dex-files/ 2>/dev/null || echo "No DEX files found or extraction completed"
-          if [ -z "$(ls -A dex-files/*.dex 2>/dev/null)" ]; then
+          if [ -z "$(ls -A dex-files/ | grep '\.dex$')" ]; then
             echo "Warning: No DEX files extracted"
           else
             echo "DEX files extracted successfully:"
@@ -303,29 +303,32 @@ jobs:
                   json.dump(info, f, indent=2)
               
               # Analyze DEX files
-              dex_files = os.listdir("dex-files")
-              dex_info = []
-              
-              for dex_file in dex_files:
-                  if dex_file.endswith('.dex'):
-                      dex_path = os.path.join("dex-files", dex_file)
-                      d = DEX(dex_path)
-                      dex_info.append({
-                          "file": dex_file,
-                          "classes_count": len(list(d.get_classes())),
-                          "methods_count": len(list(d.get_methods())),
-                          "strings_count": len(list(d.get_strings()))
-                      })
-              
-              with open("androguard-output/dex_analysis.json", "w") as f:
-                  json.dump(dex_info, f, indent=2)
-              
-              # Extract class names
-              with open("androguard-output/classes.txt", "w") as f:
+              if not os.path.exists("dex-files"):
+                  print("Warning: dex-files directory does not exist")
+              else:
+                  dex_files = os.listdir("dex-files")
+                  dex_info = []
+                  
+                  # Load DEX files once and reuse objects
+                  dex_objects = {}
                   for dex_file in dex_files:
                       if dex_file.endswith('.dex'):
                           dex_path = os.path.join("dex-files", dex_file)
                           d = DEX(dex_path)
+                          dex_objects[dex_file] = d
+                          dex_info.append({
+                              "file": dex_file,
+                              "classes_count": len(list(d.get_classes())),
+                              "methods_count": len(list(d.get_methods())),
+                              "strings_count": len(list(d.get_strings()))
+                          })
+                  
+                  with open("androguard-output/dex_analysis.json", "w") as f:
+                      json.dump(dex_info, f, indent=2)
+                  
+                  # Extract class names using cached DEX objects
+                  with open("androguard-output/classes.txt", "w") as f:
+                      for dex_file, d in dex_objects.items():
                           f.write(f"\n=== {dex_file} ===\n")
                           for cls in d.get_classes():
                               f.write(f"{cls.get_name()}\n")
