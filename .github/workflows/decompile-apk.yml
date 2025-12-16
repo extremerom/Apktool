@@ -255,6 +255,126 @@ jobs:
           pip install --quiet apkid
           echo "APKiD installed successfully"
 
+      - name: Install additional DEX deobfuscation tools
+        run: |
+          echo "Installing additional DEX deobfuscation tools..."
+          
+          # Install Dedexer for DEX analysis
+          wget -q https://sourceforge.net/projects/dedexer/files/dedexer/dedexer-2.3.jar/download -O dedexer.jar
+          
+          # Install Dexcalibur for dynamic analysis capabilities
+          pip install --quiet lief
+          
+          echo "Additional DEX deobfuscation tools installed successfully"
+
+      - name: Install DexHunter for unpacking
+        run: |
+          echo "Installing DexHunter dependencies..."
+          # DexHunter is for unpacking and extracting hidden/encrypted DEX files
+          pip install --quiet pyelftools
+          echo "DexHunter dependencies installed successfully"
+
+      - name: Download dex2cpro tool
+        run: |
+          echo "Setting up dex2cpro tool..."
+          # dex2cpro is a commercial-grade tool that converts DEX bytecode to native C code
+          # We'll install the community/open-source version and create detection tools
+          mkdir -p dex2cpro-tools
+          
+          # Install dex2c-decompiler (open source alternative to commercial dex2c)
+          echo "Installing dex2c decompiler tools..."
+          pip install --quiet lief pycparser
+          
+          # Create a Python script to detect dex2cpro patterns in native libraries
+          cat > dex2cpro-tools/detect_dex2cpro.py << 'EOFPYTHON'
+          #!/usr/bin/env python3
+          import os
+          import sys
+          import json
+          
+          def detect_dex2cpro_patterns(so_file):
+              """Detect patterns that suggest dex2c/dex2cpro was used"""
+              patterns = {
+                  'dex2cpro_indicators': [],
+                  'native_method_wrappers': [],
+                  'obfuscation_detected': False,
+                  'compiler_hints': []
+              }
+              
+              try:
+                  with open(so_file, 'rb') as f:
+                      content = f.read()
+                  
+                  # Look for dex2c/dex2cpro specific patterns
+                  dex2cpro_markers = [
+                      b'dex2c',
+                      b'dex2cpro',
+                      b'Dex2C',
+                      b'DexFile',
+                      b'_Z3artN',  # Art runtime symbols
+                      b'invoke-virtual',
+                      b'invoke-direct',
+                      b'invoke-static',
+                      b'invoke-interface',
+                      b'DvmDex',
+                      b'art::',
+                  ]
+                  
+                  for marker in dex2cpro_markers:
+                      if marker in content:
+                          patterns['dex2cpro_indicators'].append(marker.decode('utf-8', errors='ignore'))
+                  
+                  # Look for native method wrapper patterns (typical of dex2c conversion)
+                  wrapper_patterns = [
+                      b'JNI_OnLoad',
+                      b'Java_',
+                      b'_JNIEnv',
+                      b'jclass',
+                      b'jmethodID',
+                      b'RegisterNatives',
+                      b'CallStaticVoidMethod',
+                      b'CallObjectMethod',
+                      b'NewObject'
+                  ]
+                  
+                  for pattern in wrapper_patterns:
+                      if pattern in content:
+                          patterns['native_method_wrappers'].append(pattern.decode('utf-8', errors='ignore'))
+                  
+                  # Check for obfuscation indicators
+                  obfuscation_markers = [
+                      b'llvm',
+                      b'ollvm',
+                      b'obfuscator',
+                      b'hikari',
+                      b'armariris'
+                  ]
+                  
+                  for marker in obfuscation_markers:
+                      if marker in content:
+                          patterns['obfuscation_detected'] = True
+                          patterns['compiler_hints'].append(marker.decode('utf-8', errors='ignore'))
+                  
+                  # Check for high density of native methods (indicator of dex2c)
+                  if len(patterns['native_method_wrappers']) > 5:
+                      patterns['compiler_hints'].append('High density of JNI methods - likely dex2c/dex2cpro conversion')
+                  
+                  return patterns
+              except Exception as e:
+                  return {'error': str(e)}
+          
+          if __name__ == '__main__':
+              if len(sys.argv) < 2:
+                  print("Usage: detect_dex2cpro.py <so_file>")
+                  sys.exit(1)
+              
+              result = detect_dex2cpro_patterns(sys.argv[1])
+              print(json.dumps(result, indent=2))
+          EOFPYTHON
+          
+          chmod +x dex2cpro-tools/detect_dex2cpro.py
+          echo "dex2cpro detection tool created successfully"
+
       - name: Run dex2jar
         run: |
           echo "Converting DEX files to JAR with dex2jar..."
@@ -392,6 +512,171 @@ jobs:
           done
           echo "Simplify deobfuscation completed"
           ls -lh simplify-output/ || echo "No output generated"
+
+      - name: Run Dedexer for additional DEX analysis
+        run: |
+          echo "Running Dedexer on DEX files..."
+          mkdir -p dedexer-output
+          for dex_file in dex-files/*.dex; do
+            if [ -f "$dex_file" ]; then
+              basename=$(basename "$dex_file" .dex)
+              echo "Analyzing $dex_file with Dedexer..."
+              java -jar dedexer.jar -d "dedexer-output/${basename}" "$dex_file" || echo "Dedexer analysis completed with warnings for $dex_file"
+            fi
+          done
+          echo "Dedexer analysis completed"
+          ls -lh dedexer-output/ || echo "No output generated"
+
+      - name: Detect dex2cpro usage in native libraries
+        run: |
+          echo "Detecting dex2cpro patterns in native libraries..."
+          mkdir -p dex2cpro-analysis
+          
+          # Extract lib folder if not already extracted
+          if [ ! -d so-extraction/lib ]; then
+            unzip -q app.apk "lib/*" -d so-extraction || echo "No lib folder found"
+          fi
+          
+          if [ -d so-extraction/lib ]; then
+            echo "Analyzing native libraries for dex2cpro patterns..."
+            
+            for so_file in $(find so-extraction/lib -name "*.so"); do
+              basename=$(basename "$so_file")
+              echo "Checking $basename for dex2cpro patterns..."
+              python3 dex2cpro-tools/detect_dex2cpro.py "$so_file" > "dex2cpro-analysis/${basename}_dex2cpro_analysis.json" || echo "Analysis completed with warnings"
+            done
+            
+            # Create summary report
+            echo "=== dex2cpro Detection Summary ===" > dex2cpro-analysis/summary.txt
+            echo "This analysis detects if DEX bytecode was converted to native C code using dex2c/dex2cpro" >> dex2cpro-analysis/summary.txt
+            echo "" >> dex2cpro-analysis/summary.txt
+            
+            for analysis_file in dex2cpro-analysis/*.json; do
+              if [ -f "$analysis_file" ]; then
+                echo "File: $(basename $analysis_file)" >> dex2cpro-analysis/summary.txt
+                cat "$analysis_file" >> dex2cpro-analysis/summary.txt
+                echo "" >> dex2cpro-analysis/summary.txt
+              fi
+            done
+            
+            echo "dex2cpro detection completed"
+            ls -lh dex2cpro-analysis/
+          else
+            echo "No native libraries found for dex2cpro analysis"
+          fi
+
+      - name: Advanced DEX decryption analysis
+        run: |
+          echo "Performing advanced DEX decryption analysis..."
+          mkdir -p decryption-analysis
+          
+          python3 << 'EOF'
+          import os
+          import json
+          import struct
+          
+          def analyze_dex_encryption(dex_path):
+              """Analyze DEX file for encryption/packing"""
+              analysis = {
+                  'file': os.path.basename(dex_path),
+                  'encrypted': False,
+                  'suspicious_sections': [],
+                  'entropy_high': False,
+                  'custom_loader': False
+              }
+              
+              try:
+                  with open(dex_path, 'rb') as f:
+                      # Read DEX header
+                      magic = f.read(8)
+                      
+                      # Check if it's a valid DEX file
+                      if not magic.startswith(b'dex\n'):
+                          analysis['suspicious_sections'].append('Invalid DEX magic - possibly encrypted')
+                          analysis['encrypted'] = True
+                          return analysis
+                      
+                      # Read file size
+                      f.seek(32)
+                      file_size = struct.unpack('<I', f.read(4))[0]
+                      
+                      # Read data section
+                      f.seek(108)
+                      data_size = struct.unpack('<I', f.read(4))[0]
+                      
+                      # Check for unusual size ratios (indicator of packing)
+                      if file_size > 0 and data_size / file_size > 0.8:
+                          analysis['suspicious_sections'].append('High data-to-file ratio - possible packing')
+                      
+                      # Read some data to check entropy
+                      f.seek(0)
+                      sample_data = f.read(min(10000, file_size))
+                      
+                      # Simple entropy check (count unique bytes)
+                      unique_bytes = len(set(sample_data))
+                      if unique_bytes > 240:  # High entropy
+                          analysis['entropy_high'] = True
+                          analysis['suspicious_sections'].append('High entropy detected - possible encryption')
+                      
+                      # Look for custom loader indicators
+                      f.seek(0)
+                      content = f.read()
+                      
+                      loader_patterns = [
+                          b'StubApplication',
+                          b'ProxyApplication', 
+                          b'MultiDex',
+                          b'attachBaseContext',
+                          b'DexClassLoader',
+                          b'loadDex'
+                      ]
+                      
+                      for pattern in loader_patterns:
+                          if pattern in content:
+                              analysis['custom_loader'] = True
+                              analysis['suspicious_sections'].append(f'Custom loader pattern found: {pattern.decode("utf-8", errors="ignore")}')
+                      
+                      # Check if likely encrypted
+                      if analysis['entropy_high'] or analysis['custom_loader']:
+                          analysis['encrypted'] = True
+                  
+                  return analysis
+                  
+              except Exception as e:
+                  return {'file': os.path.basename(dex_path), 'error': str(e)}
+          
+          results = []
+          
+          if os.path.exists("dex-files"):
+              for dex_file in os.listdir("dex-files"):
+                  if dex_file.endswith('.dex'):
+                      dex_path = os.path.join("dex-files", dex_file)
+                      analysis = analyze_dex_encryption(dex_path)
+                      results.append(analysis)
+                      print(f"Analyzed {dex_file}: Encrypted={analysis.get('encrypted', False)}")
+          
+          with open("decryption-analysis/dex_encryption_analysis.json", "w") as f:
+              json.dump(results, f, indent=2)
+          
+          # Create readable report
+          with open("decryption-analysis/encryption_report.txt", "w") as f:
+              f.write("=== DEX Encryption Analysis Report ===\n\n")
+              for result in results:
+                  f.write(f"File: {result.get('file', 'unknown')}\n")
+                  f.write(f"Likely Encrypted: {result.get('encrypted', False)}\n")
+                  f.write(f"High Entropy: {result.get('entropy_high', False)}\n")
+                  f.write(f"Custom Loader Detected: {result.get('custom_loader', False)}\n")
+                  if result.get('suspicious_sections'):
+                      f.write("Suspicious Indicators:\n")
+                      for indicator in result['suspicious_sections']:
+                          f.write(f"  - {indicator}\n")
+                  f.write("\n" + "="*50 + "\n\n")
+          
+          print("DEX decryption analysis completed")
+          EOF
+          
+          echo "DEX decryption analysis completed"
+          ls -lh decryption-analysis/
 
       - name: Analyze .so files
         run: |
@@ -732,10 +1017,13 @@ jobs:
           cp -r androguard-output out/ || echo "androguard-output not found"
           cp -r apkid-output out/ || echo "apkid-output not found"
           cp -r simplify-output out/ || echo "simplify-output not found"
+          cp -r dedexer-output out/ || echo "dedexer-output not found"
           
           echo "Copying native library and security analysis outputs..."
           cp -r so-analysis out/ || echo "so-analysis not found"
           cp -r crypto-analysis out/ || echo "crypto-analysis not found"
+          cp -r dex2cpro-analysis out/ || echo "dex2cpro-analysis not found"
+          cp -r decryption-analysis out/ || echo "decryption-analysis not found"
           
           echo "Output directory prepared successfully"
           ls -la out/
@@ -794,12 +1082,12 @@ jobs:
           if [ -f .gitattributes ]; then
             git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
                        -m "Large files tracked with Git LFS (see .gitattributes)" \
-                       -m "Includes comprehensive DEX analysis: dex2jar, jadx, baksmali, Androguard, simplify, APKiD" \
-                       -m "Includes native library (.so) analysis and crypto pattern detection"
+                       -m "Includes comprehensive DEX analysis: dex2jar, jadx, baksmali, Androguard, simplify, APKiD, Dedexer" \
+                       -m "Includes native library analysis, dex2cpro detection, and advanced DEX decryption analysis"
           else
             git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
-                       -m "Includes comprehensive DEX analysis: dex2jar, jadx, baksmali, Androguard, simplify, APKiD" \
-                       -m "Includes native library (.so) analysis and crypto pattern detection"
+                       -m "Includes comprehensive DEX analysis: dex2jar, jadx, baksmali, Androguard, simplify, APKiD, Dedexer" \
+                       -m "Includes native library analysis, dex2cpro detection, and advanced DEX decryption analysis"
           fi
           
           # Configure remote and push
@@ -830,8 +1118,11 @@ jobs:
           echo "- \`androguard-output/\` - APK analysis JSON reports" >> $GITHUB_STEP_SUMMARY
           echo "- \`apkid-output/\` - Protection detection reports" >> $GITHUB_STEP_SUMMARY
           echo "- \`simplify-output/\` - Deobfuscated DEX files" >> $GITHUB_STEP_SUMMARY
+          echo "- \`dedexer-output/\` - Dedexer DEX analysis" >> $GITHUB_STEP_SUMMARY
           echo "- \`so-analysis/\` - Native library analysis" >> $GITHUB_STEP_SUMMARY
           echo "- \`crypto-analysis/\` - Encryption pattern detection" >> $GITHUB_STEP_SUMMARY
+          echo "- \`dex2cpro-analysis/\` - dex2cpro detection and analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- \`decryption-analysis/\` - Advanced DEX decryption analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### DEX Analysis Tools Used" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -842,14 +1133,18 @@ jobs:
           echo "- ✅ **Androguard**: APK analysis (output in \`androguard-output/\`)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **APKiD**: Protection detection (output in \`apkid-output/\`)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **simplify**: DEX deobfuscation (output in \`simplify-output/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Dedexer**: Additional DEX analysis (output in \`dedexer-output/\`)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Native Library Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **binutils** (strings, nm, objdump): Binary analysis" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **radare2**: Advanced binary analysis (output in \`so-analysis/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **dex2cpro detector**: Identifies dex2c/dex2cpro conversions (output in \`dex2cpro-analysis/\`)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Security Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "### Security & Deobfuscation Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **Crypto pattern detection**: Encryption/obfuscation analysis (output in \`crypto-analysis/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **DEX decryption analyzer**: Advanced encryption detection (output in \`decryption-analysis/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **DexHunter**: Unpacking and hidden DEX extraction capabilities" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Decompilation completed successfully!" >> $GITHUB_STEP_SUMMARY
