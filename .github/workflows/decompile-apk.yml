@@ -210,8 +210,8 @@ jobs:
       - name: Install jadx
         run: |
           echo "Installing jadx..."
-          wget -q https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip
-          unzip -q jadx-1.5.1.zip -d jadx
+          wget -q https://github.com/skylot/jadx/releases/download/v1.5.3/jadx-1.5.3.zip
+          unzip -q jadx-1.5.3.zip -d jadx
           chmod +x jadx/bin/jadx
           echo "$GITHUB_WORKSPACE/jadx/bin" >> $GITHUB_PATH
           echo "jadx installed successfully"
@@ -220,8 +220,8 @@ jobs:
         run: |
           echo "Installing baksmali and smali..."
           mkdir -p smali-tools
-          wget -q https://github.com/JesusFreke/smali/releases/download/v2.5.2/baksmali-2.5.2.jar -O smali-tools/baksmali.jar
-          wget -q https://github.com/JesusFreke/smali/releases/download/v2.5.2/smali-2.5.2.jar -O smali-tools/smali.jar
+          wget -q https://github.com/baksmali/smali/releases/download/v3.0.9/smali-baksmali-3.0.9.jar -O smali-tools/baksmali.jar
+          wget -q https://github.com/baksmali/smali/releases/download/v3.0.9/smali-3.0.9.jar -O smali-tools/smali.jar
           echo "baksmali and smali installed successfully"
 
       - name: Install Androguard
