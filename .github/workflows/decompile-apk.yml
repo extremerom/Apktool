@@ -444,14 +444,13 @@ jobs:
           
           python3 << 'EOF'
           import os
-          import re
           import json
           
           crypto_patterns = {
-              "AES": [b"Ljavax/crypto/Cipher;", b"AES"],
-              "DES": [b"DES", b"TripleDES"],
-              "RSA": [b"RSA", b"Ljavax/crypto/"],
-              "Base64": [b"Landroid/util/Base64;", b"base64"],
+              "AES": [b"Ljavax/crypto/Cipher;", b"AES", b"aes"],
+              "DES": [b"DES", b"TripleDES", b"des"],
+              "RSA": [b"RSA", b"Ljavax/crypto/", b"rsa"],
+              "Base64": [b"Landroid/util/Base64;", b"base64", b"Base64"],
               "Custom_XOR": [b"xor", b"XOR"],
               "Obfuscation": [b"ProGuard", b"DexGuard", b"Allatori"]
           }
@@ -462,6 +461,13 @@ jobs:
               for dex_file in os.listdir("dex-files"):
                   if dex_file.endswith('.dex'):
                       dex_path = os.path.join("dex-files", dex_file)
+                      file_size = os.path.getsize(dex_path)
+                      
+                      # Skip files larger than 100MB to avoid memory issues
+                      if file_size > 100 * 1024 * 1024:
+                          print(f"Skipping {dex_file} (too large: {file_size / 1024 / 1024:.1f}MB)")
+                          continue
+                      
                       with open(dex_path, 'rb') as f:
                           content = f.read()
                       
