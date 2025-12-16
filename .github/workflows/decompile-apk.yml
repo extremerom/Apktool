@@ -186,6 +186,160 @@ jobs:
           echo "APK downloaded successfully"
           ls -lh app.apk
 
+      - name: Extract DEX files from APK
+        run: |
+          echo "Extracting DEX files from APK..."
+          mkdir -p dex-files
+          unzip -j app.apk '*.dex' -d dex-files/ 2>/dev/null || echo "No DEX files found or extraction completed"
+          if [ -z "$(ls -A dex-files/*.dex 2>/dev/null)" ]; then
+            echo "Warning: No DEX files extracted"
+          else
+            echo "DEX files extracted successfully:"
+            ls -lh dex-files/
+          fi
+
+      - name: Install dex2jar
+        run: |
+          echo "Installing dex2jar..."
+          wget -q https://github.com/pxb1988/dex2jar/releases/download/v2.4/dex-tools-v2.4.zip
+          unzip -q dex-tools-v2.4.zip
+          chmod +x dex-tools-v2.4/*.sh
+          echo "$GITHUB_WORKSPACE/dex-tools-v2.4" >> $GITHUB_PATH
+          echo "dex2jar installed successfully"
+
+      - name: Install jadx
+        run: |
+          echo "Installing jadx..."
+          wget -q https://github.com/skylot/jadx/releases/download/v1.5.1/jadx-1.5.1.zip
+          unzip -q jadx-1.5.1.zip -d jadx
+          chmod +x jadx/bin/jadx
+          echo "$GITHUB_WORKSPACE/jadx/bin" >> $GITHUB_PATH
+          echo "jadx installed successfully"
+
+      - name: Install baksmali/smali
+        run: |
+          echo "Installing baksmali and smali..."
+          mkdir -p smali-tools
+          wget -q https://github.com/JesusFreke/smali/releases/download/v2.5.2/baksmali-2.5.2.jar -O smali-tools/baksmali.jar
+          wget -q https://github.com/JesusFreke/smali/releases/download/v2.5.2/smali-2.5.2.jar -O smali-tools/smali.jar
+          echo "baksmali and smali installed successfully"
+
+      - name: Install Androguard
+        run: |
+          echo "Installing Androguard..."
+          pip install --quiet androguard
+          echo "Androguard installed successfully"
+
+      - name: Run dex2jar
+        run: |
+          echo "Converting DEX files to JAR with dex2jar..."
+          mkdir -p dex2jar-output
+          if [ -f dex-files/classes.dex ]; then
+            d2j-dex2jar.sh dex-files/classes.dex -o dex2jar-output/classes.jar --force || echo "dex2jar conversion had warnings"
+          fi
+          # Convert additional dex files if they exist
+          for dex_file in dex-files/classes*.dex; do
+            if [ -f "$dex_file" ] && [ "$dex_file" != "dex-files/classes.dex" ]; then
+              basename=$(basename "$dex_file" .dex)
+              d2j-dex2jar.sh "$dex_file" -o "dex2jar-output/${basename}.jar" --force || echo "dex2jar conversion had warnings"
+            fi
+          done
+          echo "dex2jar conversion completed"
+          ls -lh dex2jar-output/ || echo "No JAR files generated"
+
+      - name: Run jadx
+        run: |
+          echo "Decompiling APK to Java source with jadx..."
+          mkdir -p jadx-output
+          jadx app.apk -d jadx-output --show-bad-code || echo "jadx decompilation completed with warnings"
+          echo "jadx decompilation completed"
+          ls -lh jadx-output/ || echo "No output generated"
+
+      - name: Run baksmali
+        run: |
+          echo "Disassembling DEX files with baksmali..."
+          mkdir -p baksmali-output
+          for dex_file in dex-files/*.dex; do
+            if [ -f "$dex_file" ]; then
+              basename=$(basename "$dex_file" .dex)
+              java -jar smali-tools/baksmali.jar d "$dex_file" -o "baksmali-output/${basename}" || echo "baksmali disassembly had warnings"
+            fi
+          done
+          echo "baksmali disassembly completed"
+          ls -lh baksmali-output/ || echo "No output generated"
+
+      - name: Run Androguard analysis
+        run: |
+          echo "Analyzing APK with Androguard..."
+          mkdir -p androguard-output
+          python3 << 'EOF'
+          from androguard.core.apk import APK
+          from androguard.core.dex import DEX
+          import json
+          import sys
+          import os
+          
+          try:
+              # Analyze APK
+              apk = APK("app.apk")
+              
+              # Extract basic information
+              info = {
+                  "package": apk.get_package(),
+                  "app_name": apk.get_app_name(),
+                  "version_name": apk.get_androidversion_name(),
+                  "version_code": apk.get_androidversion_code(),
+                  "min_sdk": apk.get_min_sdk_version(),
+                  "target_sdk": apk.get_target_sdk_version(),
+                  "permissions": apk.get_permissions(),
+                  "activities": apk.get_activities(),
+                  "services": apk.get_services(),
+                  "receivers": apk.get_receivers(),
+                  "providers": apk.get_providers(),
+              }
+              
+              # Save to JSON
+              with open("androguard-output/apk_analysis.json", "w") as f:
+                  json.dump(info, f, indent=2)
+              
+              # Analyze DEX files
+              dex_files = os.listdir("dex-files")
+              dex_info = []
+              
+              for dex_file in dex_files:
+                  if dex_file.endswith('.dex'):
+                      dex_path = os.path.join("dex-files", dex_file)
+                      d = DEX(dex_path)
+                      dex_info.append({
+                          "file": dex_file,
+                          "classes_count": len(list(d.get_classes())),
+                          "methods_count": len(list(d.get_methods())),
+                          "strings_count": len(list(d.get_strings()))
+                      })
+              
+              with open("androguard-output/dex_analysis.json", "w") as f:
+                  json.dump(dex_info, f, indent=2)
+              
+              # Extract class names
+              with open("androguard-output/classes.txt", "w") as f:
+                  for dex_file in dex_files:
+                      if dex_file.endswith('.dex'):
+                          dex_path = os.path.join("dex-files", dex_file)
+                          d = DEX(dex_path)
+                          f.write(f"\n=== {dex_file} ===\n")
+                          for cls in d.get_classes():
+                              f.write(f"{cls.get_name()}\n")
+              
+              print("Androguard analysis completed successfully")
+              
+          except Exception as e:
+              print(f"Androguard analysis failed: {e}", file=sys.stderr)
+              sys.exit(1)
+          EOF
+          
+          echo "Androguard analysis completed"
+          ls -lh androguard-output/
+
       - name: Decompile APK
         run: |
           echo "Decompiling APK with dm2q framework..."
@@ -456,15 +610,21 @@ jobs:
         run: |
           cd decompiled
           
+          # Copy DEX analysis folders to the decompiled directory
+          echo "Copying DEX analysis outputs..."
+          cp -r ../dex-files ../dex2jar-output ../jadx-output ../baksmali-output ../androguard-output ./ || echo "Some analysis outputs may not exist"
+          
           # Add all files (git lfs will handle large files automatically)
           git add .
           
           # Commit with information about large files if any
           if [ -f .gitattributes ]; then
             git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
-                       -m "Large files tracked with Git LFS (see .gitattributes)"
+                       -m "Large files tracked with Git LFS (see .gitattributes)" \
+                       -m "Includes DEX analysis with dex2jar, jadx, baksmali, and Androguard"
           else
-            git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})"
+            git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
+                       -m "Includes DEX analysis with dex2jar, jadx, baksmali, and Androguard"
           fi
           
           # Configure remote and push
@@ -483,5 +643,12 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Package**: ${{ steps.package-name.outputs.package }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Repository**: [${{ github.event.inputs.target_username }}/${{ steps.create-repo.outputs.final_repo_name }}](https://github.com/${{ github.event.inputs.target_username }}/${{ steps.create-repo.outputs.final_repo_name }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### DEX Analysis Tools Used" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **dex2jar**: DEX to JAR conversion (output in \`dex2jar-output/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **jadx**: Java decompilation (output in \`jadx-output/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **baksmali**: DEX disassembly (output in \`baksmali-output/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Androguard**: APK analysis (output in \`androguard-output/\`)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Decompilation completed successfully!" >> $GITHUB_STEP_SUMMARY
