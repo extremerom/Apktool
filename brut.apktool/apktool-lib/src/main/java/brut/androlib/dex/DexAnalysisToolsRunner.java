@@ -51,6 +51,9 @@ public class DexAnalysisToolsRunner {
         OS.mkdir(toolsDir);
 
         LOGGER.info("Running additional DEX analysis tools...");
+        
+        // Generate README documentation
+        ToolsReadmeGenerator.generateReadme(toolsDir);
 
         try {
             Directory in = mApkFile.getDirectory();
