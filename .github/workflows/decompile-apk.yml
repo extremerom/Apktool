@@ -220,8 +220,8 @@ jobs:
         run: |
           echo "Installing baksmali and smali..."
           mkdir -p smali-tools
-          wget -q https://github.com/baksmali/smali/releases/download/v3.0.9/smali-baksmali-3.0.9.jar -O smali-tools/baksmali.jar
-          wget -q https://github.com/baksmali/smali/releases/download/v3.0.9/smali-3.0.9.jar -O smali-tools/smali.jar
+          wget -q https://github.com/baksmali/smali/releases/download/3.0.9/smali-baksmali-3.0.9.jar -O smali-tools/baksmali.jar
+          wget -q https://github.com/baksmali/smali/releases/download/3.0.9/smali-3.0.9.jar -O smali-tools/smali.jar
           echo "baksmali and smali installed successfully"
 
       - name: Install Androguard
