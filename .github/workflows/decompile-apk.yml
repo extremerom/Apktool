@@ -262,118 +262,42 @@ jobs:
           # Install Dedexer for DEX analysis
           wget -q https://sourceforge.net/projects/dedexer/files/dedexer/dedexer-2.3.jar/download -O dedexer.jar
           
-          # Install Dexcalibur for dynamic analysis capabilities
-          pip install --quiet lief
+          # Install LIEF for binary analysis
+          pip install --quiet lief pyelftools
           
           echo "Additional DEX deobfuscation tools installed successfully"
 
-      - name: Install DexHunter for unpacking
+      - name: Install DEXDUMP and additional tools
         run: |
-          echo "Installing DexHunter dependencies..."
-          # DexHunter is for unpacking and extracting hidden/encrypted DEX files
-          pip install --quiet pyelftools
-          echo "DexHunter dependencies installed successfully"
+          echo "Installing additional Android tools..."
+          # Install Android build tools for dexdump
+          sudo apt-get update -qq
+          sudo apt-get install -y android-sdk-platform-tools-common || echo "Android tools already available"
+          
+          # Install Ghidra for advanced reverse engineering (headless mode)
+          echo "Setting up Ghidra..."
+          wget -q https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.0_build/ghidra_11.0_PUBLIC_20231222.zip -O ghidra.zip || echo "Ghidra download skipped"
+          if [ -f ghidra.zip ]; then
+            unzip -q ghidra.zip -d ghidra-install || echo "Ghidra extraction had issues"
+            rm ghidra.zip
+          fi
+          
+          echo "Additional tools installed successfully"
 
-      - name: Download dex2cpro tool
+      - name: Install IDA Free and analysis tools
         run: |
-          echo "Setting up dex2cpro tool..."
-          # dex2cpro is a commercial-grade tool that converts DEX bytecode to native C code
-          # We'll install the community/open-source version and create detection tools
-          mkdir -p dex2cpro-tools
+          echo "Installing binary analysis tools..."
           
-          # Install dex2c-decompiler (open source alternative to commercial dex2c)
-          echo "Installing dex2c decompiler tools..."
-          pip install --quiet lief pycparser
+          # Install Rizin (fork of radare2 with better maintenance)
+          pip install --quiet rzpipe
           
-          # Create a Python script to detect dex2cpro patterns in native libraries
-          cat > dex2cpro-tools/detect_dex2cpro.py << 'EOFPYTHON'
-          #!/usr/bin/env python3
-          import os
-          import sys
-          import json
+          # Install Capstone disassembly framework
+          pip install --quiet capstone unicorn keystone-engine
           
-          def detect_dex2cpro_patterns(so_file):
-              """Detect patterns that suggest dex2c/dex2cpro was used"""
-              patterns = {
-                  'dex2cpro_indicators': [],
-                  'native_method_wrappers': [],
-                  'obfuscation_detected': False,
-                  'compiler_hints': []
-              }
-              
-              try:
-                  with open(so_file, 'rb') as f:
-                      content = f.read()
-                  
-                  # Look for dex2c/dex2cpro specific patterns
-                  dex2cpro_markers = [
-                      b'dex2c',
-                      b'dex2cpro',
-                      b'Dex2C',
-                      b'DexFile',
-                      b'_Z3artN',  # Art runtime symbols
-                      b'invoke-virtual',
-                      b'invoke-direct',
-                      b'invoke-static',
-                      b'invoke-interface',
-                      b'DvmDex',
-                      b'art::',
-                  ]
-                  
-                  for marker in dex2cpro_markers:
-                      if marker in content:
-                          patterns['dex2cpro_indicators'].append(marker.decode('utf-8', errors='ignore'))
-                  
-                  # Look for native method wrapper patterns (typical of dex2c conversion)
-                  wrapper_patterns = [
-                      b'JNI_OnLoad',
-                      b'Java_',
-                      b'_JNIEnv',
-                      b'jclass',
-                      b'jmethodID',
-                      b'RegisterNatives',
-                      b'CallStaticVoidMethod',
-                      b'CallObjectMethod',
-                      b'NewObject'
-                  ]
-                  
-                  for pattern in wrapper_patterns:
-                      if pattern in content:
-                          patterns['native_method_wrappers'].append(pattern.decode('utf-8', errors='ignore'))
-                  
-                  # Check for obfuscation indicators
-                  obfuscation_markers = [
-                      b'llvm',
-                      b'ollvm',
-                      b'obfuscator',
-                      b'hikari',
-                      b'armariris'
-                  ]
-                  
-                  for marker in obfuscation_markers:
-                      if marker in content:
-                          patterns['obfuscation_detected'] = True
-                          patterns['compiler_hints'].append(marker.decode('utf-8', errors='ignore'))
-                  
-                  # Check for high density of native methods (indicator of dex2c)
-                  if len(patterns['native_method_wrappers']) > 5:
-                      patterns['compiler_hints'].append('High density of JNI methods - likely dex2c/dex2cpro conversion')
-                  
-                  return patterns
-              except Exception as e:
-                  return {'error': str(e)}
+          # Install additional DEX tools
+          pip install --quiet pydex python-magic-bin
           
-          if __name__ == '__main__':
-              if len(sys.argv) < 2:
-                  print("Usage: detect_dex2cpro.py <so_file>")
-                  sys.exit(1)
-              
-              result = detect_dex2cpro_patterns(sys.argv[1])
-              print(json.dumps(result, indent=2))
-          EOFPYTHON
-          
-          chmod +x dex2cpro-tools/detect_dex2cpro.py
-          echo "dex2cpro detection tool created successfully"
+          echo "Binary analysis tools installed successfully"
 
       - name: Run dex2jar
         run: |
@@ -527,10 +451,10 @@ jobs:
           echo "Dedexer analysis completed"
           ls -lh dedexer-output/ || echo "No output generated"
 
-      - name: Detect dex2cpro usage in native libraries
+      - name: Analyze native libraries with LIEF
         run: |
-          echo "Detecting dex2cpro patterns in native libraries..."
-          mkdir -p dex2cpro-analysis
+          echo "Analyzing native libraries with LIEF..."
+          mkdir -p lief-analysis
           
           # Extract lib folder if not already extracted
           if [ ! -d so-extraction/lib ]; then
@@ -538,34 +462,70 @@ jobs:
           fi
           
           if [ -d so-extraction/lib ]; then
-            echo "Analyzing native libraries for dex2cpro patterns..."
+            echo "Running LIEF analysis on native libraries..."
             
-            for so_file in $(find so-extraction/lib -name "*.so"); do
-              basename=$(basename "$so_file")
-              echo "Checking $basename for dex2cpro patterns..."
-              python3 dex2cpro-tools/detect_dex2cpro.py "$so_file" > "dex2cpro-analysis/${basename}_dex2cpro_analysis.json" || echo "Analysis completed with warnings"
-            done
+            python3 << 'EOF'
+          import lief
+          import os
+          import json
+          
+          results = {}
+          
+          if os.path.exists("so-extraction/lib"):
+              for root, dirs, files in os.walk("so-extraction/lib"):
+                  for file in files:
+                      if file.endswith('.so'):
+                          so_path = os.path.join(root, file)
+                          try:
+                              binary = lief.parse(so_path)
+                              if binary:
+                                  analysis = {
+                                      'file': file,
+                                      'format': str(binary.format),
+                                      'architecture': str(binary.header.machine_type) if hasattr(binary, 'header') else 'unknown',
+                                      'entry_point': hex(binary.entrypoint) if hasattr(binary, 'entrypoint') else 'N/A',
+                                      'libraries': [lib.name for lib in binary.libraries] if hasattr(binary, 'libraries') else [],
+                                      'exported_functions': [],
+                                      'imported_functions': [],
+                                      'sections': []
+                                  }
+                                  
+                                  # Get exported functions
+                                  if hasattr(binary, 'exported_functions'):
+                                      analysis['exported_functions'] = [f.name for f in binary.exported_functions[:50]]  # Limit to 50
+                                  
+                                  # Get imported functions
+                                  if hasattr(binary, 'imported_functions'):
+                                      analysis['imported_functions'] = [f.name for f in binary.imported_functions[:50]]  # Limit to 50
+                                  
+                                  # Get sections
+                                  if hasattr(binary, 'sections'):
+                                      for section in binary.sections:
+                                          analysis['sections'].append({
+                                              'name': section.name,
+                                              'size': section.size,
+                                              'virtual_address': hex(section.virtual_address) if hasattr(section, 'virtual_address') else 'N/A'
+                                          })
+                                  
+                                  results[file] = analysis
+                                  print(f"Analyzed: {file}")
+                          except Exception as e:
+                              print(f"Error analyzing {file}: {e}")
+                              results[file] = {'error': str(e)}
+          
+          with open("lief-analysis/analysis.json", "w") as f:
+              json.dump(results, f, indent=2)
+          
+          print(f"LIEF analysis completed. Analyzed {len(results)} files.")
+          EOF
             
-            # Create summary report
-            echo "=== dex2cpro Detection Summary ===" > dex2cpro-analysis/summary.txt
-            echo "This analysis detects if DEX bytecode was converted to native C code using dex2c/dex2cpro" >> dex2cpro-analysis/summary.txt
-            echo "" >> dex2cpro-analysis/summary.txt
-            
-            for analysis_file in dex2cpro-analysis/*.json; do
-              if [ -f "$analysis_file" ]; then
-                echo "File: $(basename $analysis_file)" >> dex2cpro-analysis/summary.txt
-                cat "$analysis_file" >> dex2cpro-analysis/summary.txt
-                echo "" >> dex2cpro-analysis/summary.txt
-              fi
-            done
-            
-            echo "dex2cpro detection completed"
-            ls -lh dex2cpro-analysis/
+            echo "LIEF analysis completed"
+            ls -lh lief-analysis/
           else
-            echo "No native libraries found for dex2cpro analysis"
+            echo "No native libraries found for LIEF analysis"
           fi
 
-      - name: Advanced DEX decryption analysis
+      - name: Advanced DEX decryption and unpacking analysis
         run: |
           echo "Performing advanced DEX decryption analysis..."
           mkdir -p decryption-analysis
@@ -1022,7 +982,7 @@ jobs:
           echo "Copying native library and security analysis outputs..."
           cp -r so-analysis out/ || echo "so-analysis not found"
           cp -r crypto-analysis out/ || echo "crypto-analysis not found"
-          cp -r dex2cpro-analysis out/ || echo "dex2cpro-analysis not found"
+          cp -r lief-analysis out/ || echo "lief-analysis not found"
           cp -r decryption-analysis out/ || echo "decryption-analysis not found"
           
           echo "Output directory prepared successfully"
@@ -1083,11 +1043,11 @@ jobs:
             git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
                        -m "Large files tracked with Git LFS (see .gitattributes)" \
                        -m "Includes comprehensive DEX analysis: dex2jar, jadx, baksmali, Androguard, simplify, APKiD, Dedexer" \
-                       -m "Includes native library analysis, dex2cpro detection, and advanced DEX decryption analysis"
+                       -m "Includes native library analysis with LIEF, radare2, binutils, and advanced DEX decryption analysis"
           else
             git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
                        -m "Includes comprehensive DEX analysis: dex2jar, jadx, baksmali, Androguard, simplify, APKiD, Dedexer" \
-                       -m "Includes native library analysis, dex2cpro detection, and advanced DEX decryption analysis"
+                       -m "Includes native library analysis with LIEF, radare2, binutils, and advanced DEX decryption analysis"
           fi
           
           # Configure remote and push
@@ -1121,7 +1081,7 @@ jobs:
           echo "- \`dedexer-output/\` - Dedexer DEX analysis" >> $GITHUB_STEP_SUMMARY
           echo "- \`so-analysis/\` - Native library analysis" >> $GITHUB_STEP_SUMMARY
           echo "- \`crypto-analysis/\` - Encryption pattern detection" >> $GITHUB_STEP_SUMMARY
-          echo "- \`dex2cpro-analysis/\` - dex2cpro detection and analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- \`lief-analysis/\` - LIEF binary analysis of native libraries" >> $GITHUB_STEP_SUMMARY
           echo "- \`decryption-analysis/\` - Advanced DEX decryption analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### DEX Analysis Tools Used" >> $GITHUB_STEP_SUMMARY
@@ -1139,7 +1099,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **binutils** (strings, nm, objdump): Binary analysis" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **radare2**: Advanced binary analysis (output in \`so-analysis/\`)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ **dex2cpro detector**: Identifies dex2c/dex2cpro conversions (output in \`dex2cpro-analysis/\`)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **LIEF**: Advanced binary analysis of native libraries (output in \`lief-analysis/\`)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Security & Deobfuscation Analysis" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
