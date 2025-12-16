@@ -28,12 +28,16 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * Runner for additional DEX analysis tools (dex2jar, jadx, smali/baksmali, Androguard)
  */
 public class DexAnalysisToolsRunner {
     private static final Logger LOGGER = Logger.getLogger(DexAnalysisToolsRunner.class.getName());
+    
+    // Pattern to detect potentially dangerous characters in file paths
+    private static final Pattern SAFE_PATH_PATTERN = Pattern.compile("^[a-zA-Z0-9._/\\-]+$");
 
     private final ExtFile mApkFile;
     private final File mOutputDir;
@@ -93,13 +97,33 @@ public class DexAnalysisToolsRunner {
 
     private void extractDexFile(Directory in, String dexFileName, File toolsDir) throws DirectoryException, IOException {
         File dexFile = new File(toolsDir, dexFileName);
-        try (InputStream is = in.getFileInput(dexFileName);
-             FileOutputStream fos = new FileOutputStream(dexFile)) {
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = is.read(buffer)) != -1) {
-                fos.write(buffer, 0, read);
+        try (InputStream is = in.getFileInput(dexFileName)) {
+            Files.copy(is, dexFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /**
+     * Validates a file path to prevent command injection
+     * @param file File to validate
+     * @throws AndrolibException if the path is potentially unsafe
+     */
+    private void validateFilePath(File file) throws AndrolibException {
+        try {
+            String canonicalPath = file.getCanonicalPath();
+            
+            // Ensure the file is within expected directory
+            if (!canonicalPath.startsWith(mOutputDir.getCanonicalPath())) {
+                throw new AndrolibException("File path outside of output directory: " + canonicalPath);
             }
+            
+            // Check for null bytes and other suspicious characters
+            if (canonicalPath.contains("\0") || canonicalPath.contains(";") || 
+                canonicalPath.contains("&") || canonicalPath.contains("|") ||
+                canonicalPath.contains("`") || canonicalPath.contains("$")) {
+                throw new AndrolibException("File path contains potentially dangerous characters: " + canonicalPath);
+            }
+        } catch (IOException e) {
+            throw new AndrolibException("Failed to validate file path: " + file.getPath(), e);
         }
     }
 
@@ -109,10 +133,18 @@ public class DexAnalysisToolsRunner {
 
         LOGGER.info("Running dex2jar conversion...");
         try {
+            // Validate directories before using them
+            validateFilePath(toolsDir);
+            validateFilePath(dex2jarDir);
+            
             for (String dexFileName : dexFiles) {
                 File dexFile = new File(toolsDir, dexFileName);
                 String jarFileName = dexFileName.replace(".dex", ".jar");
                 File jarFile = new File(dex2jarDir, jarFileName);
+                
+                // Validate file paths
+                validateFilePath(dexFile);
+                validateFilePath(jarFile);
 
                 // Try to use dex2jar if available in PATH
                 ProcessBuilder pb = new ProcessBuilder("d2j-dex2jar", 
@@ -146,8 +178,14 @@ public class DexAnalysisToolsRunner {
 
         LOGGER.info("Running JADX decompilation...");
         try {
+            // Validate directories
+            validateFilePath(toolsDir);
+            validateFilePath(jadxDir);
+            
             // Try to use jadx if available in PATH
             File apkPath = mApkFile.getAbsoluteFile();
+            validateFilePath(apkPath);
+            
             ProcessBuilder pb = new ProcessBuilder("jadx",
                 "-d", jadxDir.getAbsolutePath(),
                 "--no-res",
@@ -207,9 +245,16 @@ public class DexAnalysisToolsRunner {
 
         LOGGER.info("Running Androguard analysis...");
         try {
+            // Validate directories
+            validateFilePath(toolsDir);
+            validateFilePath(androguardDir);
+            
             // Try to use androguard if available in PATH
             File apkPath = mApkFile.getAbsoluteFile();
+            validateFilePath(apkPath);
+            
             File outputFile = new File(androguardDir, "androguard-analysis.txt");
+            validateFilePath(outputFile);
             
             // Try androlyze for basic analysis
             ProcessBuilder pb = new ProcessBuilder("androguard", "axml",
