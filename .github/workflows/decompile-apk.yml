@@ -130,7 +130,13 @@ jobs:
           mkdir -p apktool-bin
 
           # Copy the built jar (shadowJar outputs to standard location)
-          cp brut.apktool/apktool-cli/build/libs/apktool-cli-*.jar apktool-bin/apktool.jar
+          JAR_FILE=$(ls brut.apktool/apktool-cli/build/libs/apktool-cli-*.jar 2>/dev/null | head -1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "Error: Could not find built apktool jar file"
+            exit 1
+          fi
+          echo "Found jar file: $JAR_FILE"
+          cp "$JAR_FILE" apktool-bin/apktool.jar
 
           # Copy the wrapper script
           cp scripts/linux/apktool apktool-bin/apktool
@@ -451,8 +457,12 @@ jobs:
 
           if [ "$LARGE_FILES_FOUND" = true ]; then
             echo "✅ Large files tracked with Git LFS"
-            echo "Git LFS tracking patterns:"
-            cat .gitattributes 2>/dev/null || echo "No .gitattributes file created"
+            if [ -f .gitattributes ]; then
+              echo "Git LFS tracking patterns:"
+              cat .gitattributes
+            else
+              echo "Warning: .gitattributes was not created despite large files being found"
+            fi
           else
             echo "ℹ️  No files larger than 99MB found"
           fi
