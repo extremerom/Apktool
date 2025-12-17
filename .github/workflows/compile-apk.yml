@@ -107,33 +107,21 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Download apktool from latest release
+      - name: Build apktool from source
         run: |
-          echo "Downloading apktool.jar and script from latest release..."
+          echo "Building apktool from source..."
 
-          # Get the latest release info
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest)
-
-          # Extract download URLs using jq for reliable JSON parsing
-          JAR_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name | endswith(".jar")) | .browser_download_url' | head -1)
-          SCRIPT_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name == "apktool") | .browser_download_url' | head -1)
-
-          if [ -z "$JAR_URL" ] || [ -z "$SCRIPT_URL" ]; then
-            echo "Error: Could not find apktool.jar or script in latest release"
-            echo "JAR_URL: $JAR_URL"
-            echo "SCRIPT_URL: $SCRIPT_URL"
-            exit 1
-          fi
-
-          echo "Downloading apktool.jar from: $JAR_URL"
-          echo "Downloading apktool script from: $SCRIPT_URL"
+          # Build apktool jar
+          ./gradlew clean shadowJar
 
           # Create directory for apktool
           mkdir -p apktool-bin
 
-          # Download files
-          curl -L -o apktool-bin/apktool.jar "$JAR_URL"
-          curl -L -o apktool-bin/apktool "$SCRIPT_URL"
+          # Copy the built jar
+          cp brut.apktool/brut.apktool.cli/build/libs/brut.apktool.cli-*-all.jar apktool-bin/apktool.jar
+
+          # Copy the wrapper script
+          cp scripts/linux/apktool apktool-bin/apktool
 
           # Make the script executable
           chmod +x apktool-bin/apktool
@@ -143,14 +131,20 @@ jobs:
 
           # Verify setup
           ls -la apktool-bin/
-          echo "Apktool downloaded and configured in PATH"
+          echo "Apktool built and configured in PATH"
+
+          # Test apktool
+          apktool --version
 
       - name: Download Samsung framework
         run: |
           echo "Downloading Samsung dm2q framework..."
-          curl -L -o framework-dm2q.apk "https://gitlab.com/Eduardob3677/samsung_dm2q_dump/-/raw/dm2qxxx-user-16-BP2A.250605.031.A3-S916BXXS8EYK2-release-keys/system/system/framework/framework-res.apk"
-          if [ ! -f framework-dm2q.apk ]; then
+          if ! curl -L -f -o framework-dm2q.apk "https://gitlab.com/Eduardob3677/samsung_dm2q_dump/-/raw/dm2qxxx-user-16-BP2A.250605.031.A3-S916BXXS8EYK2-release-keys/system/system/framework/framework-res.apk"; then
             echo "Error: Failed to download framework"
+            exit 1
+          fi
+          if [ ! -f framework-dm2q.apk ] || [ ! -s framework-dm2q.apk ]; then
+            echo "Error: Framework file is missing or empty"
             exit 1
           fi
           echo "Framework downloaded successfully"
@@ -167,9 +161,12 @@ jobs:
       - name: Clone decompiled repository
         run: |
           echo "Cloning repository: ${{ github.event.inputs.repo_url }}"
-          git clone "${{ github.event.inputs.repo_url }}" decompiled
-          if [ ! -d decompiled ]; then
+          if ! git clone "${{ github.event.inputs.repo_url }}" decompiled; then
             echo "Error: Failed to clone repository"
+            exit 1
+          fi
+          if [ ! -d decompiled ]; then
+            echo "Error: Decompiled directory not found after clone"
             exit 1
           fi
           echo "Repository cloned successfully"
