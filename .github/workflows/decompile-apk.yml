@@ -112,7 +112,7 @@ jobs:
           sudo sed -i 's/^#PRIORITY=100/PRIORITY=1000/' /etc/default/zramswap
           sudo systemctl restart zramswap
           zramctl
-          
+
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
@@ -122,37 +122,37 @@ jobs:
       - name: Download apktool from latest release
         run: |
           echo "Downloading apktool.jar and script from latest release..."
-          
+
           # Get the latest release info
           LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest)
-          
+
           # Extract download URLs using jq for reliable JSON parsing
           JAR_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name | endswith(".jar")) | .browser_download_url' | head -1)
           SCRIPT_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name == "apktool") | .browser_download_url' | head -1)
-          
+
           if [ -z "$JAR_URL" ] || [ -z "$SCRIPT_URL" ]; then
             echo "Error: Could not find apktool.jar or script in latest release"
             echo "JAR_URL: $JAR_URL"
             echo "SCRIPT_URL: $SCRIPT_URL"
             exit 1
           fi
-          
+
           echo "Downloading apktool.jar from: $JAR_URL"
           echo "Downloading apktool script from: $SCRIPT_URL"
-          
+
           # Create directory for apktool
           mkdir -p apktool-bin
-          
+
           # Download files
           curl -L -o apktool-bin/apktool.jar "$JAR_URL"
           curl -L -o apktool-bin/apktool "$SCRIPT_URL"
-          
+
           # Make the script executable
           chmod +x apktool-bin/apktool
-          
+
           # Add to PATH
           echo "$GITHUB_WORKSPACE/apktool-bin" >> $GITHUB_PATH
-          
+
           # Verify setup
           ls -la apktool-bin/
           echo "Apktool downloaded and configured in PATH"
@@ -193,31 +193,31 @@ jobs:
           # Build apktool command with optional parameters using array
           # Note: --no-debug-info is controlled by keep_debug_info input
           CMD=(apktool d -o decompiled -t dm2q -p apktool-frameworks)
-          
+
           # Check mutual exclusivity of quiet and verbose flags
           if [ "${{ github.event.inputs.quiet }}" = "true" ] && [ "${{ github.event.inputs.verbose }}" = "true" ]; then
             echo "Error: quiet and verbose flags are mutually exclusive"
             exit 1
           fi
-          
+
           # Add optional quiet flag
           if [ "${{ github.event.inputs.quiet }}" = "true" ]; then
             CMD+=(-q)
             echo "Using quiet mode (-q)"
           fi
-          
+
           # Add optional verbose flag
           if [ "${{ github.event.inputs.verbose }}" = "true" ]; then
             CMD+=(-v)
             echo "Using verbose mode (-v)"
           fi
-          
+
           # Add optional force flag
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             CMD+=(-f)
             echo "Using force mode (-f)"
           fi
-          
+
           # Add optional jobs parameter with validation
           if [ -n "${{ github.event.inputs.jobs }}" ]; then
             # Validate that jobs is a non-negative integer (0 means auto-detect)
@@ -232,7 +232,7 @@ jobs:
               echo "Using ${{ github.event.inputs.jobs }} parallel jobs"
             fi
           fi
-          
+
           # Add optional lib parameter (can be multiple, comma-separated) with validation
           if [ -n "${{ github.event.inputs.lib }}" ]; then
             IFS=',' read -ra LIBS <<< "${{ github.event.inputs.lib }}"
@@ -253,19 +253,19 @@ jobs:
               echo "Using shared library: $lib"
             done
           fi
-          
+
           # Add optional no-resources flag
           if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
             CMD+=(-r)
             echo "Skipping resource decoding (-r)"
           fi
-          
+
           # Add optional no-sources flag
           if [ "${{ github.event.inputs.no_src }}" = "true" ]; then
             CMD+=(-s)
             echo "Skipping source decoding (-s)"
           fi
-          
+
           # Add optional only-main-classes flag
           if [ "${{ github.event.inputs.only_main_classes }}" = "true" ]; then
             if [ "${{ github.event.inputs.no_src }}" = "true" ]; then
@@ -275,7 +275,7 @@ jobs:
             CMD+=(--only-main-classes)
             echo "Only disassembling main dex classes (--only-main-classes)"
           fi
-          
+
           # Add no-debug-info flag (default behavior unless keep_debug_info is true)
           if [ "${{ github.event.inputs.keep_debug_info }}" != "true" ]; then
             CMD+=(--no-debug-info)
@@ -283,7 +283,7 @@ jobs:
           else
             echo "Keeping debug info in sources"
           fi
-          
+
           # Add optional only-manifest flag
           if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
             if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
@@ -293,7 +293,7 @@ jobs:
             CMD+=(--only-manifest)
             echo "Only decoding AndroidManifest.xml (--only-manifest)"
           fi
-          
+
           # Add optional res-resolve-mode
           if [ -n "${{ github.event.inputs.res_resolve_mode }}" ]; then
             if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
@@ -316,7 +316,7 @@ jobs:
                 ;;
             esac
           fi
-          
+
           # Add optional keep-broken-res flag
           if [ "${{ github.event.inputs.keep_broken_res }}" = "true" ]; then
             if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
@@ -330,25 +330,25 @@ jobs:
             CMD+=(--keep-broken-res)
             echo "Keeping broken resources (--keep-broken-res)"
           fi
-          
+
           # Add optional match-original flag
           if [ "${{ github.event.inputs.match_original }}" = "true" ]; then
             CMD+=(--match-original)
             echo "Keeping files closest to original (--match-original)"
           fi
-          
+
           # Add optional no-assets flag
           if [ "${{ github.event.inputs.no_assets }}" = "true" ]; then
             CMD+=(--no-assets)
             echo "Skipping asset decoding (--no-assets)"
           fi
-          
+
           # Add APK file at the end
           CMD+=(app.apk)
-          
+
           echo "Executing: ${CMD[@]}"
           "${CMD[@]}"
-          
+
           if [ ! -d decompiled ]; then
             echo "Error: Decompilation failed"
             exit 1
@@ -413,17 +413,17 @@ jobs:
       - name: Track large files with Git LFS
         run: |
           cd decompiled
-          
+
           # Initialize git repository first (needed for git lfs)
           git init
-          
+
           # Initialize Git LFS
           git lfs install
-          
+
           # Find files larger than 99MB and track them with Git LFS
           echo "Scanning for files larger than 99MB..."
           LARGE_FILES_FOUND=false
-          
+
           # Find files larger than 99MB (99 * 1024 * 1024 bytes = 103,809,024 bytes = 99 MiB)
           # Using MiB (binary) threshold to stay safely under GitHub's 100MB limit
           while IFS= read -r -d '' file; do
@@ -434,13 +434,13 @@ jobs:
                 # Calculate size in MB for display (without bc dependency)
                 size_mb=$((size / 1024 / 1024))
                 echo "Found large file: $file (${size_mb}MB)"
-                
+
                 # Track this file pattern with git lfs
                 git lfs track "$file"
               fi
             fi
           done < <(find . -type f -print0)
-          
+
           if [ "$LARGE_FILES_FOUND" = true ]; then
             echo "✅ Large files tracked with Git LFS"
             echo "Git LFS tracking patterns:"
@@ -456,10 +456,10 @@ jobs:
           REPO_NAME: ${{ steps.create-repo.outputs.final_repo_name }}
         run: |
           cd decompiled
-          
+
           # Add all files (git lfs will handle large files automatically)
           git add .
-          
+
           # Commit with information about large files if any
           if [ -f .gitattributes ]; then
             git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
@@ -467,11 +467,11 @@ jobs:
           else
             git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})"
           fi
-          
+
           # Configure remote and push
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/$TARGET_USER/$REPO_NAME.git"
           git branch -M main
-          
+
           # Push to remote (Git LFS pre-push hook will automatically handle LFS files)
           echo "Pushing content to repository..."
           git push -u origin main
