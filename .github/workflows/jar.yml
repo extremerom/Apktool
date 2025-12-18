@@ -1,0 +1,465 @@
+name: Decompile APK and Upload to Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: 'URL to download the APK'
+        required: true
+        type: string
+      target_username:
+        description: 'GitHub username where the repository will be created'
+        required: true
+        type: string
+        # Note: Ensure only trusted users can trigger this workflow as it creates
+        # repositories under the specified username using the TEST token
+      quiet:
+        description: 'Suppress normal output (-q/--quiet)'
+        required: false
+        type: boolean
+        default: false
+      verbose:
+        description: 'Increase output verbosity (-v/--verbose)'
+        required: false
+        type: boolean
+        default: false
+      force:
+        description: 'Force delete destination directory (-f/--force)'
+        required: false
+        type: boolean
+        default: false
+      jobs:
+        description: 'Number of jobs to execute in parallel (-j/--jobs)'
+        required: false
+        type: string
+        default: ''
+      lib:
+        description: 'Use shared library package:file, comma-separated for multiple (-l/--lib)'
+        required: false
+        type: string
+        default: ''
+      no_res:
+        description: 'Do not decode resources (-r/--no-res)'
+        required: false
+        type: boolean
+        default: false
+      no_src:
+        description: 'Do not decode sources (-s/--no-src)'
+        required: false
+        type: boolean
+        default: false
+      only_main_classes:
+        description: 'Only disassemble main dex classes (--only-main-classes)'
+        required: false
+        type: boolean
+        default: false
+      keep_debug_info:
+        description: 'Include debug info in sources (default: disabled with --no-debug-info)'
+        required: false
+        type: boolean
+        default: false
+      only_manifest:
+        description: 'Only decode AndroidManifest.xml (--only-manifest)'
+        required: false
+        type: boolean
+        default: false
+      res_resolve_mode:
+        description: 'Resources resolve mode: remove, dummy, or keep (--res-resolve-mode)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - remove
+          - dummy
+          - keep
+        default: ''
+      keep_broken_res:
+        description: 'Keep broken resources (--keep-broken-res)'
+        required: false
+        type: boolean
+        default: false
+      match_original:
+        description: 'Keep files closest to original (--match-original)'
+        required: false
+        type: boolean
+        default: false
+      no_assets:
+        description: 'Do not decode assets (--no-assets)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  decompile-and-upload:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Download apktool from latest release
+        run: |
+          echo "Downloading apktool.jar and script from latest release..."
+          
+          # Get the latest release info
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest)
+          
+          # Extract download URLs using jq for reliable JSON parsing
+          JAR_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name | endswith(".jar")) | .browser_download_url' | head -1)
+          SCRIPT_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name == "apktool") | .browser_download_url' | head -1)
+          
+          if [ -z "$JAR_URL" ] || [ -z "$SCRIPT_URL" ]; then
+            echo "Error: Could not find apktool.jar or script in latest release"
+            echo "JAR_URL: $JAR_URL"
+            echo "SCRIPT_URL: $SCRIPT_URL"
+            exit 1
+          fi
+          
+          echo "Downloading apktool.jar from: $JAR_URL"
+          echo "Downloading apktool script from: $SCRIPT_URL"
+          
+          # Create directory for apktool
+          mkdir -p apktool-bin
+          
+          # Download files
+          curl -L -o apktool-bin/apktool.jar "$JAR_URL"
+          curl -L -o apktool-bin/apktool "$SCRIPT_URL"
+          
+          # Make the script executable
+          chmod +x apktool-bin/apktool
+          
+          # Add to PATH
+          echo "$GITHUB_WORKSPACE/apktool-bin" >> $GITHUB_PATH
+          
+          # Verify setup
+          ls -la apktool-bin/
+          echo "Apktool downloaded and configured in PATH"
+
+      - name: Download Samsung framework
+        run: |
+          echo "Downloading Samsung dm2q framework..."
+          curl -L -o framework-dm2q.apk "https://dumps.tadiphone.dev/dumps/google/komodo/-/raw/komodo-user-16-BP3A.251105.015-14339231-release-keys/system/system/framework/framework.jar?ref_type=heads"
+          if [ ! -f framework-dm2q.apk ]; then
+            echo "Error: Failed to download framework"
+            exit 1
+          fi
+          echo "Framework downloaded successfully"
+          ls -lh framework-dm2q.apk
+
+      - name: Install framework with dm2q tag
+        run: |
+          echo "Creating framework directory..."
+          mkdir -p apktool-frameworks
+          echo "Installing framework with tag dm2q to apktool-frameworks..."
+          apktool if framework-dm2q.apk -t dm2q -p apktool-frameworks
+          echo "Framework installed successfully with tag dm2q"
+
+      - name: Download APK
+        run: |
+          echo "Downloading APK from ${{ github.event.inputs.apk_url }}"
+          curl -L -o app.apk "${{ github.event.inputs.apk_url }}"
+          if [ ! -f app.apk ]; then
+            echo "Error: Failed to download APK"
+            exit 1
+          fi
+          echo "APK downloaded successfully"
+          ls -lh app.apk
+
+      - name: Decompile APK
+        run: |
+          echo "Decompiling APK with dm2q framework..."
+          # Build apktool command with optional parameters using array
+          # Note: --no-debug-info is controlled by keep_debug_info input
+          CMD=(apktool d -o decompiled -t dm2q -p apktool-frameworks)
+          
+          # Check mutual exclusivity of quiet and verbose flags
+          if [ "${{ github.event.inputs.quiet }}" = "true" ] && [ "${{ github.event.inputs.verbose }}" = "true" ]; then
+            echo "Error: quiet and verbose flags are mutually exclusive"
+            exit 1
+          fi
+          
+          # Add optional quiet flag
+          if [ "${{ github.event.inputs.quiet }}" = "true" ]; then
+            CMD+=(-q)
+            echo "Using quiet mode (-q)"
+          fi
+          
+          # Add optional verbose flag
+          if [ "${{ github.event.inputs.verbose }}" = "true" ]; then
+            CMD+=(-v)
+            echo "Using verbose mode (-v)"
+          fi
+          
+          # Add optional force flag
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            CMD+=(-f)
+            echo "Using force mode (-f)"
+          fi
+          
+          # Add optional jobs parameter with validation
+          if [ -n "${{ github.event.inputs.jobs }}" ]; then
+            # Validate that jobs is a non-negative integer (0 means auto-detect)
+            if ! [[ "${{ github.event.inputs.jobs }}" =~ ^[0-9]+$ ]]; then
+              echo "Error: jobs must be a non-negative integer (0 for auto-detect)"
+              exit 1
+            fi
+            CMD+=(-j "${{ github.event.inputs.jobs }}")
+            if [ "${{ github.event.inputs.jobs }}" = "0" ]; then
+              echo "Using auto-detect for parallel jobs"
+            else
+              echo "Using ${{ github.event.inputs.jobs }} parallel jobs"
+            fi
+          fi
+          
+          # Add optional lib parameter (can be multiple, comma-separated) with validation
+          if [ -n "${{ github.event.inputs.lib }}" ]; then
+            IFS=',' read -ra LIBS <<< "${{ github.event.inputs.lib }}"
+            for lib in "${LIBS[@]}"; do
+              # Trim whitespace
+              lib=$(echo "$lib" | xargs)
+              # Validate format: package:file and prevent path traversal
+              if ! [[ "$lib" =~ ^[a-zA-Z0-9._-]+:[a-zA-Z0-9._/-]+$ ]]; then
+                echo "Error: lib format must be package:file (got: $lib)"
+                exit 1
+              fi
+              # Check for path traversal sequences
+              if [[ "$lib" == *".."* ]]; then
+                echo "Error: lib path cannot contain '..' sequences"
+                exit 1
+              fi
+              CMD+=(-l "$lib")
+              echo "Using shared library: $lib"
+            done
+          fi
+          
+          # Add optional no-resources flag
+          if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+            CMD+=(-r)
+            echo "Skipping resource decoding (-r)"
+          fi
+          
+          # Add optional no-sources flag
+          if [ "${{ github.event.inputs.no_src }}" = "true" ]; then
+            CMD+=(-s)
+            echo "Skipping source decoding (-s)"
+          fi
+          
+          # Add optional only-main-classes flag
+          if [ "${{ github.event.inputs.only_main_classes }}" = "true" ]; then
+            if [ "${{ github.event.inputs.no_src }}" = "true" ]; then
+              echo "Error: only-main-classes conflicts with no-src"
+              exit 1
+            fi
+            CMD+=(--only-main-classes)
+            echo "Only disassembling main dex classes (--only-main-classes)"
+          fi
+          
+          # Add no-debug-info flag (default behavior unless keep_debug_info is true)
+          if [ "${{ github.event.inputs.keep_debug_info }}" != "true" ]; then
+            CMD+=(--no-debug-info)
+            echo "Excluding debug info from sources (--no-debug-info)"
+          else
+            echo "Keeping debug info in sources"
+          fi
+          
+          # Add optional only-manifest flag
+          if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
+            if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+              echo "Error: only-manifest conflicts with no-res"
+              exit 1
+            fi
+            CMD+=(--only-manifest)
+            echo "Only decoding AndroidManifest.xml (--only-manifest)"
+          fi
+          
+          # Add optional res-resolve-mode
+          if [ -n "${{ github.event.inputs.res_resolve_mode }}" ]; then
+            if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+              echo "Error: res-resolve-mode conflicts with no-res"
+              exit 1
+            fi
+            if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
+              echo "Error: res-resolve-mode conflicts with only-manifest"
+              exit 1
+            fi
+            # Validate res_resolve_mode value
+            case "${{ github.event.inputs.res_resolve_mode }}" in
+              remove|dummy|keep)
+                CMD+=(--res-resolve-mode "${{ github.event.inputs.res_resolve_mode }}")
+                echo "Using resource resolve mode: ${{ github.event.inputs.res_resolve_mode }}"
+                ;;
+              *)
+                echo "Error: Invalid res-resolve-mode. Must be 'remove', 'dummy', or 'keep'"
+                exit 1
+                ;;
+            esac
+          fi
+          
+          # Add optional keep-broken-res flag
+          if [ "${{ github.event.inputs.keep_broken_res }}" = "true" ]; then
+            if [ "${{ github.event.inputs.no_res }}" = "true" ]; then
+              echo "Error: keep-broken-res conflicts with no-res"
+              exit 1
+            fi
+            if [ "${{ github.event.inputs.only_manifest }}" = "true" ]; then
+              echo "Error: keep-broken-res conflicts with only-manifest"
+              exit 1
+            fi
+            CMD+=(--keep-broken-res)
+            echo "Keeping broken resources (--keep-broken-res)"
+          fi
+          
+          # Add optional match-original flag
+          if [ "${{ github.event.inputs.match_original }}" = "true" ]; then
+            CMD+=(--match-original)
+            echo "Keeping files closest to original (--match-original)"
+          fi
+          
+          # Add optional no-assets flag
+          if [ "${{ github.event.inputs.no_assets }}" = "true" ]; then
+            CMD+=(--no-assets)
+            echo "Skipping asset decoding (--no-assets)"
+          fi
+          
+          # Add APK file at the end
+          CMD+=(app.apk)
+          
+          echo "Executing: ${CMD[@]}"
+          "${CMD[@]}"
+          
+          if [ ! -d decompiled ]; then
+            echo "Error: Decompilation failed"
+            exit 1
+          fi
+          echo "Decompilation completed successfully"
+
+      - name: Extract package name
+        id: package-name
+        run: |
+          # Extract package name from AndroidManifest.xml
+          PACKAGE=framework_jar
+          # Replace dots with underscores
+          REPO_NAME=$(echo "$PACKAGE")
+          echo "package=$PACKAGE" >> $GITHUB_OUTPUT
+          echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+          echo "Package: $PACKAGE"
+          echo "Repository name: $REPO_NAME"
+
+      - name: Check and create repository
+        id: create-repo
+        env:
+          GH_TOKEN: ${{ secrets.TEST }}
+          TARGET_USER: ${{ github.event.inputs.target_username }}
+          BASE_REPO_NAME: ${{ steps.package-name.outputs.repo_name }}
+        run: |
+          REPO_NAME="$BASE_REPO_NAME"
+          COUNTER=2
+
+          # Check if repository exists and find available name
+          while gh repo view "$TARGET_USER/$REPO_NAME" &>/dev/null; do
+            echo "Repository $TARGET_USER/$REPO_NAME already exists"
+            REPO_NAME="${BASE_REPO_NAME}_${COUNTER}"
+            COUNTER=$((COUNTER + 1))
+          done
+
+          echo "Creating repository: $TARGET_USER/$REPO_NAME"
+          gh repo create "$TARGET_USER/$REPO_NAME" --public --description "Decompiled APK: ${{ steps.package-name.outputs.package }}"
+
+          echo "final_repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+          echo "Repository created: $TARGET_USER/$REPO_NAME"
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install Git LFS
+        run: |
+          # Install Git LFS (should already be available on ubuntu-latest)
+          git lfs version || (sudo apt-get update && sudo apt-get install -y git-lfs)
+          echo "Git LFS installed successfully"
+
+      - name: Track large files with Git LFS
+        run: |
+          cd decompiled
+          
+          # Initialize git repository first (needed for git lfs)
+          git init
+          
+          # Initialize Git LFS
+          git lfs install
+          
+          # Find files larger than 99MB and track them with Git LFS
+          echo "Scanning for files larger than 99MB..."
+          LARGE_FILES_FOUND=false
+          
+          # Find files larger than 99MB (99 * 1024 * 1024 bytes = 103,809,024 bytes = 99 MiB)
+          # Using MiB (binary) threshold to stay safely under GitHub's 100MB limit
+          while IFS= read -r -d '' file; do
+            if [ -f "$file" ]; then
+              size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+              if [ "$size" -gt 103809024 ]; then
+                LARGE_FILES_FOUND=true
+                # Calculate size in MB for display (without bc dependency)
+                size_mb=$((size / 1024 / 1024))
+                echo "Found large file: $file (${size_mb}MB)"
+                
+                # Track this file pattern with git lfs
+                git lfs track "$file"
+              fi
+            fi
+          done < <(find . -type f -print0)
+          
+          if [ "$LARGE_FILES_FOUND" = true ]; then
+            echo "✅ Large files tracked with Git LFS"
+            echo "Git LFS tracking patterns:"
+            cat .gitattributes
+          else
+            echo "ℹ️  No files larger than 99MB found"
+          fi
+
+      - name: Push decompiled content to new repository
+        env:
+          GH_TOKEN: ${{ secrets.TEST }}
+          TARGET_USER: ${{ github.event.inputs.target_username }}
+          REPO_NAME: ${{ steps.create-repo.outputs.final_repo_name }}
+        run: |
+          cd decompiled
+          
+          # Add all files (git lfs will handle large files automatically)
+          git add .
+          
+          # Commit with information about large files if any
+          if [ -f .gitattributes ]; then
+            git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})" \
+                       -m "Large files tracked with Git LFS (see .gitattributes)"
+          else
+            git commit -m "Initial commit: Decompiled APK (${{ steps.package-name.outputs.package }})"
+          fi
+          
+          # Configure remote and push
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/$TARGET_USER/$REPO_NAME.git"
+          git branch -M main
+          
+          # Push to remote (Git LFS pre-push hook will automatically handle LFS files)
+          echo "Pushing content to repository..."
+          git push -u origin main
+
+          echo "✅ Decompiled content pushed successfully to: https://github.com/$TARGET_USER/$REPO_NAME"
+
+      - name: Summary
+        run: |
+          echo "## Decompilation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package**: ${{ steps.package-name.outputs.package }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: [${{ github.event.inputs.target_username }}/${{ steps.create-repo.outputs.final_repo_name }}](https://github.com/${{ github.event.inputs.target_username }}/${{ steps.create-repo.outputs.final_repo_name }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Decompilation completed successfully!" >> $GITHUB_STEP_SUMMARY
