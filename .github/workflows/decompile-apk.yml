@@ -147,7 +147,7 @@ jobs:
       - name: Download Samsung framework
         run: |
           echo "Downloading Samsung dm2q framework..."
-          curl -L -o framework-dm2q.apk "https://gitlab.com/Eduardob3677/samsung_dm2q_dump/-/raw/dm2qxxx-user-16-BP2A.250605.031.A3-S916BXXS8EYK2-release-keys/system/system/framework/framework-res.apk"
+          curl -L -o framework-dm2q.apk "https://dumps.tadiphone.dev/dumps/google/komodo/-/raw/komodo-user-16-BP3A.251105.015-14339231-release-keys/system/system/framework/framework-res.apk?ref_type=heads"
           if [ ! -f framework-dm2q.apk ]; then
             echo "Error: Failed to download framework"
             exit 1
