@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       apk_url:
-        description: 'URL to download the APK'
+        description: 'URL to download the APK/JAR/APKM/APKS/ABB file'
         required: true
         type: string
       target_username:
