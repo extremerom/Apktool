@@ -24,4 +24,4 @@ gradle.properties
 **/out/
 
 # Patches
-*.patch
+*.patchapktool-bin/
