@@ -65,14 +65,14 @@ on:
         type: boolean
         default: false
       res_resolve_mode:
-        description: 'Resources resolve mode: remove, dummy, or keep (--res-resolve-mode)'
+        description: 'Resources resolve mode: default, greedy, or lazy (--res-resolve-mode)'
         required: false
         type: choice
         options:
           - ''
-          - remove
-          - dummy
-          - keep
+          - default
+          - greedy
+          - lazy
         default: ''
       keep_broken_res:
         description: 'Keep broken resources (--keep-broken-res)'
@@ -89,6 +89,21 @@ on:
         required: false
         type: boolean
         default: false
+      frame_tag:
+        description: 'Use framework files tagged with specified tag (-t/--frame-tag)'
+        required: false
+        type: string
+        default: 'dm2q'
+      frame_path:
+        description: 'Use framework files located in specified directory (-p/--frame-path)'
+        required: false
+        type: string
+        default: 'apktool-frameworks'
+      output_dir:
+        description: 'Output decoded files to specified directory (-o/--output)'
+        required: false
+        type: string
+        default: 'decompiled'
 
 jobs:
   decompile-and-upload:
@@ -129,10 +144,10 @@ jobs:
           # Create directory for apktool
           mkdir -p apktool-bin
 
-          # Copy the built jar (shadowJar outputs to standard location)
-          JAR_FILE=$(ls brut.apktool/apktool-cli/build/libs/apktool-cli-*.jar 2>/dev/null | head -1)
-          if [ -z "$JAR_FILE" ]; then
-            echo "Error: Could not find built apktool jar file"
+          # Copy the built jar (shadowJar outputs to apktool-cli.jar)
+          JAR_FILE="brut.apktool/apktool-cli/build/libs/apktool-cli.jar"
+          if [ ! -f "$JAR_FILE" ]; then
+            echo "Error: Could not find built apktool jar file at $JAR_FILE"
             exit 1
           fi
           echo "Found jar file: $JAR_FILE"
@@ -170,13 +185,15 @@ jobs:
           echo "Framework downloaded successfully"
           ls -lh framework-dm2q.apk
 
-      - name: Install framework with dm2q tag
+      - name: Install framework with tag
         run: |
           echo "Creating framework directory..."
-          mkdir -p apktool-frameworks
-          echo "Installing framework with tag dm2q to apktool-frameworks..."
-          apktool if framework-dm2q.apk -t dm2q -p apktool-frameworks
-          echo "Framework installed successfully with tag dm2q"
+          FRAME_PATH="${{ github.event.inputs.frame_path }}"
+          FRAME_TAG="${{ github.event.inputs.frame_tag }}"
+          mkdir -p "$FRAME_PATH"
+          echo "Installing framework with tag $FRAME_TAG to $FRAME_PATH..."
+          apktool if framework-dm2q.apk -t "$FRAME_TAG" -p "$FRAME_PATH"
+          echo "Framework installed successfully with tag $FRAME_TAG"
 
       - name: Download APK
         run: |
@@ -194,10 +211,13 @@ jobs:
 
       - name: Decompile APK
         run: |
-          echo "Decompiling APK with dm2q framework..."
+          FRAME_TAG="${{ github.event.inputs.frame_tag }}"
+          FRAME_PATH="${{ github.event.inputs.frame_path }}"
+          OUTPUT_DIR="${{ github.event.inputs.output_dir }}"
+          echo "Decompiling APK with framework tag $FRAME_TAG..."
           # Build apktool command with optional parameters using array
           # Note: --no-debug-info is controlled by keep_debug_info input
-          CMD=(apktool d -o decompiled -t dm2q -p apktool-frameworks)
+          CMD=(apktool d -o "$OUTPUT_DIR" -t "$FRAME_TAG" -p "$FRAME_PATH")
 
           # Check mutual exclusivity of quiet and verbose flags
           if [ "${{ github.event.inputs.quiet }}" = "true" ] && [ "${{ github.event.inputs.verbose }}" = "true" ]; then
@@ -311,12 +331,12 @@ jobs:
             fi
             # Validate res_resolve_mode value
             case "${{ github.event.inputs.res_resolve_mode }}" in
-              remove|dummy|keep)
+              default|greedy|lazy)
                 CMD+=(--res-resolve-mode "${{ github.event.inputs.res_resolve_mode }}")
                 echo "Using resource resolve mode: ${{ github.event.inputs.res_resolve_mode }}"
                 ;;
               *)
-                echo "Error: Invalid res-resolve-mode. Must be 'remove', 'dummy', or 'keep'"
+                echo "Error: Invalid res-resolve-mode. Must be 'default', 'greedy', or 'lazy'"
                 exit 1
                 ;;
             esac
@@ -354,7 +374,8 @@ jobs:
           echo "Executing: ${CMD[@]}"
           "${CMD[@]}"
 
-          if [ ! -d decompiled ]; then
+          OUTPUT_DIR="${{ github.event.inputs.output_dir }}"
+          if [ ! -d "$OUTPUT_DIR" ]; then
             echo "Error: Decompilation failed"
             exit 1
           fi
@@ -363,9 +384,10 @@ jobs:
       - name: Extract package name
         id: package-name
         run: |
+          OUTPUT_DIR="${{ github.event.inputs.output_dir }}"
           # Extract package name from AndroidManifest.xml
-          if [ -f decompiled/AndroidManifest.xml ]; then
-            PACKAGE=$(grep -oP 'package="\K[^"]+' decompiled/AndroidManifest.xml | head -n 1)
+          if [ -f "$OUTPUT_DIR/AndroidManifest.xml" ]; then
+            PACKAGE=$(grep -oP 'package="\K[^"]+' "$OUTPUT_DIR/AndroidManifest.xml" | head -n 1)
             if [ -z "$PACKAGE" ]; then
               echo "Error: Could not extract package name"
               exit 1
@@ -417,7 +439,8 @@ jobs:
 
       - name: Track large files with Git LFS
         run: |
-          cd decompiled
+          OUTPUT_DIR="${{ github.event.inputs.output_dir }}"
+          cd "$OUTPUT_DIR"
 
           # Initialize git repository first (needed for git lfs)
           git init
@@ -473,7 +496,8 @@ jobs:
           TARGET_USER: ${{ github.event.inputs.target_username }}
           REPO_NAME: ${{ steps.create-repo.outputs.final_repo_name }}
         run: |
-          cd decompiled
+          OUTPUT_DIR="${{ github.event.inputs.output_dir }}"
+          cd "$OUTPUT_DIR"
 
           # Add all files (git lfs will handle large files automatically)
           git add .
