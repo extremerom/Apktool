@@ -191,6 +191,18 @@ public class ApkDecoder {
         SmaliDecoder decoder = new SmaliDecoder(mApkFile, fileName, mConfig.isBaksmaliDebugMode());
         decoder.decode(smaliDir);
 
+        // Deobfuscate smali files if enabled
+        if (mConfig.isDeobfuscate()) {
+            LOGGER.info("Deobfuscating " + fileName + "...");
+            try {
+                brut.androlib.deobfuscate.DexDeobfuscator deobfuscator = 
+                    new brut.androlib.deobfuscate.DexDeobfuscator(smaliDir);
+                deobfuscator.deobfuscate();
+            } catch (AndrolibException ex) {
+                LOGGER.warning("Deobfuscation failed for " + fileName + ": " + ex.getMessage());
+            }
+        }
+
         // Record minSdkVersion if there's no AndroidManifest.xml, i.e. JARs.
         int minSdkVersion = decoder.getInferredApiLevel();
         if (mMinSdkVersion == 0 || mMinSdkVersion > minSdkVersion) {

@@ -18,6 +18,7 @@ package brut.apktool;
 
 import brut.androlib.ApkBuilder;
 import brut.androlib.ApkDecoder;
+import brut.androlib.BundleDecoder;
 import brut.androlib.Config;
 import brut.androlib.exceptions.AndrolibException;
 import brut.androlib.exceptions.FrameworkNotFoundException;
@@ -142,6 +143,11 @@ public class Main {
         .desc("Do not decode assets.")
         .get();
 
+    private static final Option decodeDeobfuscateOption = Option.builder()
+        .longOpt("deobfuscate")
+        .desc("Apply basic deobfuscation to smali files.")
+        .get();
+
     private static final Option decodeOutputOption = Option.builder("o")
         .longOpt("output")
         .desc("Output decoded files to <dir>. (default: apk.out)")
@@ -264,6 +270,7 @@ public class Main {
                 decodeOptions.addOption(decodeOnlyMainClassesOption);
                 decodeOptions.addOption(decodeOnlyManifestOption);
                 decodeOptions.addOption(decodeResResolveModeOption);
+                decodeOptions.addOption(decodeDeobfuscateOption);
             }
         }
 
@@ -509,6 +516,13 @@ public class Main {
         if (cli.hasOption(decodeNoAssetsOption)) {
             config.setDecodeAssets(Config.DecodeAssets.NONE);
         }
+        if (cli.hasOption(decodeDeobfuscateOption)) {
+            if (cli.hasOption(decodeNoSrcOption)) {
+                printOptionConflict(decodeDeobfuscateOption, decodeNoSrcOption);
+            } else {
+                config.setDeobfuscate(true);
+            }
+        }
 
         File outDir;
         if (cli.hasOption(decodeOutputOption)) {
@@ -517,6 +531,14 @@ public class Main {
             outDir = new File(apkName.endsWith(".apk")
                 ? apkName.substring(0, apkName.length() - 4).trim()
                 : apkName + ".out");
+        }
+
+        // Check if the file is a bundle format (APKM, APKS, XAPK)
+        File inputFile = new File(apkName);
+        if (BundleDecoder.isBundleFile(inputFile)) {
+            BundleDecoder bundleDecoder = new BundleDecoder(inputFile, config);
+            bundleDecoder.decode(outDir);
+            return;
         }
 
         try (ExtFile apkFile = new ExtFile(apkName)) {
