@@ -116,22 +116,35 @@ jobs:
           JAR_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name | endswith(".jar")) | .browser_download_url' | head -1)
           SCRIPT_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name == "apktool") | .browser_download_url' | head -1)
           
-          if [ -z "$JAR_URL" ] || [ -z "$SCRIPT_URL" ]; then
-            echo "Error: Could not find apktool.jar or script in latest release"
+          if [ -z "$JAR_URL" ]; then
+            echo "Error: Could not find apktool.jar in latest release"
             echo "JAR_URL: $JAR_URL"
-            echo "SCRIPT_URL: $SCRIPT_URL"
             exit 1
           fi
           
           echo "Downloading apktool.jar from: $JAR_URL"
-          echo "Downloading apktool script from: $SCRIPT_URL"
           
           # Create directory for apktool
           mkdir -p apktool-bin
           
-          # Download files
-          curl -L -o apktool-bin/apktool.jar "$JAR_URL"
-          curl -L -o apktool-bin/apktool "$SCRIPT_URL"
+          # Download JAR file with retry logic and proper timeouts
+          if ! curl -L --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 5 -o apktool-bin/apktool.jar "$JAR_URL"; then
+            echo "Error: Failed to download apktool.jar"
+            exit 1
+          fi
+          
+          # Download or copy script with fallback
+          if [ -n "$SCRIPT_URL" ]; then
+            echo "Downloading apktool script from: $SCRIPT_URL"
+            # Try to download with timeout and retry, but don't fail if it doesn't work
+            if ! curl -L --connect-timeout 30 --max-time 60 --retry 3 --retry-delay 5 -o apktool-bin/apktool "$SCRIPT_URL"; then
+              echo "Warning: Failed to download script from release, using local script instead"
+              cp scripts/linux/apktool apktool-bin/apktool
+            fi
+          else
+            echo "Script URL not found in release, using local script"
+            cp scripts/linux/apktool apktool-bin/apktool
+          fi
           
           # Make the script executable
           chmod +x apktool-bin/apktool
