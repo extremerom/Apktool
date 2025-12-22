@@ -39,11 +39,6 @@ public class DexDeobfuscator {
     private final Map<String, String> mFieldNameMap = new HashMap<>();
     private final Map<String, String> mMethodNameMap = new HashMap<>();
     
-    // Patterns for obfuscated names (single letter, or short random strings)
-    private static final Pattern OBFUSCATED_CLASS_PATTERN = Pattern.compile("L([a-z]/)+[a-z];");
-    private static final Pattern OBFUSCATED_FIELD_PATTERN = Pattern.compile("^\\.field .* ([a-z]):.*$");
-    private static final Pattern OBFUSCATED_METHOD_PATTERN = Pattern.compile("^\\.method .* ([a-z])\\(.*$");
-    
     private int classCounter = 0;
     private int fieldCounter = 0;
     private int methodCounter = 0;
@@ -246,7 +241,13 @@ public class DexDeobfuscator {
             return false;
         }
         
-        String name = className.substring(className.lastIndexOf('/') + 1, className.length() - 1);
+        int lastSlash = className.lastIndexOf('/');
+        if (lastSlash < 0 || lastSlash >= className.length() - 2) {
+            // No slash found or slash is at the end - invalid format
+            return false;
+        }
+        
+        String name = className.substring(lastSlash + 1, className.length() - 1);
         return name.length() <= 2 && name.matches("[a-z]+");
     }
     

@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -35,6 +36,7 @@ import java.util.zip.ZipFile;
  */
 public class BundleDecoder {
     private static final Logger LOGGER = Logger.getLogger(BundleDecoder.class.getName());
+    private static final Pattern BASE_APK_PATTERN = Pattern.compile(".*[^a-z]base[^a-z].*\\.apk", Pattern.CASE_INSENSITIVE);
     
     private final File mBundleFile;
     private final Config mConfig;
@@ -150,7 +152,7 @@ public class BundleDecoder {
         for (File apk : apkFiles) {
             String name = apk.getName().toLowerCase();
             if (name.equals("base.apk") || name.contains("base.") || 
-                name.matches(".*[^a-z]base[^a-z].*\\.apk")) {
+                BASE_APK_PATTERN.matcher(name).matches()) {
                 return apk;
             }
         }

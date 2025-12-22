@@ -22,6 +22,7 @@ import brut.androlib.exceptions.OutDirExistsException;
 import brut.androlib.meta.ApkInfo;
 import brut.androlib.res.ResourcesDecoder;
 import brut.androlib.smali.SmaliDecoder;
+import brut.androlib.deobfuscate.DexDeobfuscator;
 import brut.directory.Directory;
 import brut.directory.DirectoryException;
 import brut.directory.ExtFile;
@@ -195,8 +196,7 @@ public class ApkDecoder {
         if (mConfig.isDeobfuscate()) {
             LOGGER.info("Deobfuscating " + fileName + "...");
             try {
-                brut.androlib.deobfuscate.DexDeobfuscator deobfuscator = 
-                    new brut.androlib.deobfuscate.DexDeobfuscator(smaliDir);
+                DexDeobfuscator deobfuscator = new DexDeobfuscator(smaliDir);
                 deobfuscator.deobfuscate();
             } catch (AndrolibException ex) {
                 LOGGER.warning("Deobfuscation failed for " + fileName + ": " + ex.getMessage());
