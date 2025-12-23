@@ -49,9 +49,28 @@ public class SmaliDecoder {
 
     public void decode(File outDir) throws AndrolibException {
         try {
-            // Create the container.
+            // #3641 - Limit opcode API level to 29 or below (dex version up to 039) during disassembly
+            // to match the limit used during assembly in SmaliBuilder.
+            Opcodes limitedOpcodes = null;
+            try {
+                // First load with default opcodes to determine the original API level
+                MultiDexContainer<? extends DexBackedDexFile> tempContainer =
+                    DexFileFactory.loadDexContainer(mApkFile, null);
+                String firstEntry = tempContainer.getDexEntryNames().get(0);
+                DexBackedDexFile tempDexFile = tempContainer.getEntry(firstEntry).getDexFile();
+                int originalApiLevel = tempDexFile.getOpcodes().api;
+                
+                // Limit to API 29 if needed
+                int limitedApiLevel = Math.min(originalApiLevel, 29);
+                limitedOpcodes = Opcodes.forApi(limitedApiLevel);
+            } catch (Exception e) {
+                // If we can't determine the API level, use default opcodes limited to API 29
+                limitedOpcodes = Opcodes.forApi(29);
+            }
+            
+            // Create the container with limited opcodes.
             MultiDexContainer<? extends DexBackedDexFile> container =
-                DexFileFactory.loadDexContainer(mApkFile, null);
+                DexFileFactory.loadDexContainer(mApkFile, limitedOpcodes);
             ArrayList<MultiDexContainer.DexEntry<? extends DexBackedDexFile>> dexEntries = new ArrayList<>();
             DexBackedDexFile dexFile = null;
             boolean isDexContainerFormat = false;
@@ -84,11 +103,8 @@ public class SmaliDecoder {
                 dexFile = decodeInternal(dexEntry, smaliDir);
             }
 
-            int apiLevel = dexFile.getOpcodes().api;
-            if (apiLevel > 29) {
-                apiLevel = 29;
-            }
-            mInferredApiLevel = apiLevel;
+            // The API level is already limited during loading, but we store it for reference
+            mInferredApiLevel = dexFile.getOpcodes().api;
         } catch (IOException ex) {
             throw new AndrolibException("Could not baksmali file: " + mDexName, ex);
         }
