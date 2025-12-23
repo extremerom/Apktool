@@ -1,0 +1,11 @@
+!!brut.androlib.meta.MetaInfo
+apkFileName: verification_bypass.apk
+isFrameworkApk: false
+sdkInfo:
+  minSdkVersion: '14'
+  targetSdkVersion: '28'
+packageInfo:
+  forcedPackageId: '127'
+versionInfo:
+  versionCode: '1'
+  versionName: '1.0'
