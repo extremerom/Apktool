@@ -519,11 +519,18 @@ public class BinaryXmlResourceParser implements XmlResourceParser {
             setFirstError(ex);
         }
 
-        LOGGER.warning(String.format(
-            "Could not decode attr value: ns=%s, name=%s, value=0x%08x",
-            getAttributePrefix(index), getAttributeName(index), valueData));
+        // Use fallback coercion for values that couldn't be decoded
         decoded = ResXmlEncoders.coerceToString(valueType, valueData);
-        return decoded != null ? decoded : "";
+        
+        // Only log a warning if the fallback also failed to produce a value
+        if (decoded == null) {
+            LOGGER.warning(String.format(
+                "Could not decode attr value: ns=%s, name=%s, value=0x%08x",
+                getAttributePrefix(index), getAttributeName(index), valueData));
+            return "";
+        }
+        
+        return decoded;
     }
 
     @Override
