@@ -40,6 +40,7 @@ public class Config {
     private boolean mKeepBrokenResources;
     private boolean mAnalysisMode;
     private DecodeAssets mDecodeAssets;
+    private boolean mDeobfuscate;
 
     // Build options
     private boolean mNoApk;
@@ -74,6 +75,7 @@ public class Config {
         mKeepBrokenResources = false;
         mAnalysisMode = false;
         mDecodeAssets = DecodeAssets.FULL;
+        mDeobfuscate = false;
 
         // Build options
         mNoApk = false;
@@ -202,6 +204,14 @@ public class Config {
     public void setDecodeAssets(DecodeAssets decodeAssets) {
         assert decodeAssets != null;
         mDecodeAssets = decodeAssets;
+    }
+
+    public boolean isDeobfuscate() {
+        return mDeobfuscate;
+    }
+
+    public void setDeobfuscate(boolean deobfuscate) {
+        mDeobfuscate = deobfuscate;
     }
 
     // Build options
