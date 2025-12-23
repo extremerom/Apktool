@@ -77,6 +77,26 @@ on:
         required: false
         type: string
         default: ''
+      frame_tag:
+        description: 'Use framework files tagged with specified tag (-t/--frame-tag)'
+        required: false
+        type: string
+        default: 'dm2q'
+      frame_path:
+        description: 'Use framework files located in specified directory (-p/--frame-path)'
+        required: false
+        type: string
+        default: 'apktool-frameworks'
+      output_apk:
+        description: 'Output the built apk to specified file (-o/--output)'
+        required: false
+        type: string
+        default: 'compiled.apk'
+      input_dir:
+        description: 'Input directory containing decompiled APK files'
+        required: false
+        type: string
+        default: 'decompiled'
 
 jobs:
   compile-and-sign:
@@ -94,80 +114,89 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Download apktool from latest release
+      - name: Build apktool from source
         run: |
-          echo "Downloading apktool.jar and script from latest release..."
-          
-          # Get the latest release info
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest)
-          
-          # Extract download URLs using jq for reliable JSON parsing
-          JAR_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name | endswith(".jar")) | .browser_download_url' | head -1)
-          SCRIPT_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name == "apktool") | .browser_download_url' | head -1)
-          
-          if [ -z "$JAR_URL" ] || [ -z "$SCRIPT_URL" ]; then
-            echo "Error: Could not find apktool.jar or script in latest release"
-            echo "JAR_URL: $JAR_URL"
-            echo "SCRIPT_URL: $SCRIPT_URL"
-            exit 1
-          fi
-          
-          echo "Downloading apktool.jar from: $JAR_URL"
-          echo "Downloading apktool script from: $SCRIPT_URL"
-          
+          echo "Building apktool from source..."
+
+          # Build apktool jar
+          ./gradlew clean shadowJar
+
           # Create directory for apktool
           mkdir -p apktool-bin
-          
-          # Download files
-          curl -L -o apktool-bin/apktool.jar "$JAR_URL"
-          curl -L -o apktool-bin/apktool "$SCRIPT_URL"
-          
+
+          # Copy the built jar (shadowJar outputs to apktool-cli.jar)
+          JAR_FILE="brut.apktool/apktool-cli/build/libs/apktool-cli.jar"
+          if [ ! -f "$JAR_FILE" ]; then
+            echo "Error: Could not find built apktool jar file at $JAR_FILE"
+            exit 1
+          fi
+          echo "Found jar file: $JAR_FILE"
+          cp "$JAR_FILE" apktool-bin/apktool.jar
+
+          # Copy the wrapper script
+          cp scripts/linux/apktool apktool-bin/apktool
+
           # Make the script executable
           chmod +x apktool-bin/apktool
-          
+
           # Add to PATH
           echo "$GITHUB_WORKSPACE/apktool-bin" >> $GITHUB_PATH
-          
+
           # Verify setup
           ls -la apktool-bin/
-          echo "Apktool downloaded and configured in PATH"
+          echo "Apktool built and configured in PATH"
+
+      - name: Verify apktool installation
+        run: |
+          # Test apktool in a new step where PATH is updated
+          apktool --version
 
       - name: Download Samsung framework
         run: |
           echo "Downloading Samsung dm2q framework..."
-          curl -L -o framework-dm2q.apk "https://gitlab.com/Eduardob3677/samsung_dm2q_dump/-/raw/dm2qxxx-user-16-BP2A.250605.031.A3-S916BXXS8EYK2-release-keys/system/system/framework/framework-res.apk"
-          if [ ! -f framework-dm2q.apk ]; then
+          if ! curl -L -f -o framework-dm2q.apk "https://gitlab.com/Eduardob3677/samsung_dm2q_dump/-/raw/dm2qxxx-user-16-BP2A.250605.031.A3-S916BXXS8EYK2-release-keys/system/system/framework/framework-res.apk"; then
             echo "Error: Failed to download framework"
+            exit 1
+          fi
+          if [ ! -f framework-dm2q.apk ] || [ ! -s framework-dm2q.apk ]; then
+            echo "Error: Framework file is missing or empty"
             exit 1
           fi
           echo "Framework downloaded successfully"
           ls -lh framework-dm2q.apk
 
-      - name: Install framework with dm2q tag
+      - name: Install framework with tag
         run: |
           echo "Creating framework directory..."
-          mkdir -p apktool-frameworks
-          echo "Installing framework with tag dm2q to apktool-frameworks..."
-          apktool if framework-dm2q.apk -t dm2q -p apktool-frameworks
-          echo "Framework installed successfully with tag dm2q"
+          FRAME_PATH="${{ github.event.inputs.frame_path }}"
+          FRAME_TAG="${{ github.event.inputs.frame_tag }}"
+          mkdir -p "$FRAME_PATH"
+          echo "Installing framework with tag $FRAME_TAG to $FRAME_PATH..."
+          apktool if framework-dm2q.apk -t "$FRAME_TAG" -p "$FRAME_PATH"
+          echo "Framework installed successfully with tag $FRAME_TAG"
 
       - name: Clone decompiled repository
         run: |
+          INPUT_DIR="${{ github.event.inputs.input_dir }}"
           echo "Cloning repository: ${{ github.event.inputs.repo_url }}"
-          git clone "${{ github.event.inputs.repo_url }}" decompiled
-          if [ ! -d decompiled ]; then
+          if ! git clone "${{ github.event.inputs.repo_url }}" "$INPUT_DIR"; then
             echo "Error: Failed to clone repository"
             exit 1
           fi
+          if [ ! -d "$INPUT_DIR" ]; then
+            echo "Error: Input directory not found after clone"
+            exit 1
+          fi
           echo "Repository cloned successfully"
-          ls -la decompiled/
+          ls -la "$INPUT_DIR"/
 
       - name: Extract package name
         id: package-name
         run: |
+          INPUT_DIR="${{ github.event.inputs.input_dir }}"
           # Extract package name from AndroidManifest.xml
-          if [ -f decompiled/AndroidManifest.xml ]; then
-            PACKAGE=$(grep -oP 'package="\K[^"]+' decompiled/AndroidManifest.xml | head -n 1)
+          if [ -f "$INPUT_DIR/AndroidManifest.xml" ]; then
+            PACKAGE=$(grep -oP 'package="\K[^"]+' "$INPUT_DIR/AndroidManifest.xml" | head -n 1)
             if [ -z "$PACKAGE" ]; then
               echo "Error: Could not extract package name"
               exit 1
@@ -181,34 +210,38 @@ jobs:
 
       - name: Compile APK
         run: |
-          echo "Compiling APK with dm2q framework..."
+          INPUT_DIR="${{ github.event.inputs.input_dir }}"
+          FRAME_TAG="${{ github.event.inputs.frame_tag }}"
+          FRAME_PATH="${{ github.event.inputs.frame_path }}"
+          OUTPUT_APK="${{ github.event.inputs.output_apk }}"
+          echo "Compiling APK with framework tag $FRAME_TAG..."
           # Build apktool command with optional parameters using array
-          CMD=(apktool b decompiled -p apktool-frameworks -o compiled.apk)
-          
+          CMD=(apktool b "$INPUT_DIR" -p "$FRAME_PATH" -o "$OUTPUT_APK")
+
           # Check mutual exclusivity of quiet and verbose flags
           if [ "${{ github.event.inputs.quiet }}" = "true" ] && [ "${{ github.event.inputs.verbose }}" = "true" ]; then
             echo "Error: quiet and verbose flags are mutually exclusive"
             exit 1
           fi
-          
+
           # Add optional quiet flag
           if [ "${{ github.event.inputs.quiet }}" = "true" ]; then
             CMD+=(-q)
             echo "Using quiet mode (-q)"
           fi
-          
+
           # Add optional verbose flag
           if [ "${{ github.event.inputs.verbose }}" = "true" ]; then
             CMD+=(-v)
             echo "Using verbose mode (-v)"
           fi
-          
+
           # Add optional force flag
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             CMD+=(-f)
             echo "Using force mode (-f)"
           fi
-          
+
           # Add optional jobs parameter with validation
           if [ -n "${{ github.event.inputs.jobs }}" ]; then
             # Validate that jobs is a non-negative integer (0 means auto-detect)
@@ -223,7 +256,7 @@ jobs:
               echo "Using ${{ github.event.inputs.jobs }} parallel jobs"
             fi
           fi
-          
+
           # Add optional lib parameter (can be multiple, comma-separated) with validation
           if [ -n "${{ github.event.inputs.lib }}" ]; then
             IFS=',' read -ra LIBS <<< "${{ github.event.inputs.lib }}"
@@ -244,55 +277,55 @@ jobs:
               echo "Using shared library: $lib"
             done
           fi
-          
+
           # Add optional no-apk flag
           if [ "${{ github.event.inputs.no_apk }}" = "true" ]; then
             CMD+=(--no-apk)
             echo "Disabling APK repacking (--no-apk)"
           fi
-          
+
           # Add optional shorten-res-paths flag
           if [ "${{ github.event.inputs.shorten_res_paths }}" = "true" ]; then
             CMD+=(--shorten-res-paths)
             echo "Shortening resource paths (--shorten-res-paths)"
           fi
-          
+
           # Add optional enable-sparse-encoding flag
           if [ "${{ github.event.inputs.enable_sparse_encoding }}" = "true" ]; then
             CMD+=(--enable-sparse-encoding)
             echo "Enabling sparse encoding (--enable-sparse-encoding)"
           fi
-          
+
           # Add optional collapse-res-names flag
           if [ "${{ github.event.inputs.collapse_res_names }}" = "true" ]; then
             CMD+=(--collapse-res-names)
             echo "Collapsing resource names (--collapse-res-names)"
           fi
-          
+
           # Add optional no-crunch flag
           if [ "${{ github.event.inputs.no_crunch }}" = "true" ]; then
             CMD+=(--no-crunch)
             echo "Disabling resource crunching (--no-crunch)"
           fi
-          
+
           # Add optional copy-original flag
           if [ "${{ github.event.inputs.copy_original }}" = "true" ]; then
             CMD+=(--copy-original)
             echo "Copying original files (--copy-original)"
           fi
-          
+
           # Add optional debuggable flag
           if [ "${{ github.event.inputs.debuggable }}" = "true" ]; then
             CMD+=(--debuggable)
             echo "Setting android:debuggable to true (--debuggable)"
           fi
-          
+
           # Add optional net-sec-conf flag
           if [ "${{ github.event.inputs.net_sec_conf }}" = "true" ]; then
             CMD+=(--net-sec-conf)
             echo "Adding network security configuration (--net-sec-conf)"
           fi
-          
+
           # Add optional aapt parameter with validation
           if [ -n "${{ github.event.inputs.aapt }}" ]; then
             # Validate path format and prevent traversal
@@ -313,16 +346,17 @@ jobs:
             CMD+=(--aapt "$aapt_path")
             echo "Using custom aapt2 binary: $aapt_path"
           fi
-          
+
           echo "Executing: ${CMD[@]}"
           "${CMD[@]}"
-          
-          if [ ! -f compiled.apk ]; then
+
+          OUTPUT_APK="${{ github.event.inputs.output_apk }}"
+          if [ ! -f "$OUTPUT_APK" ]; then
             echo "Error: Compilation failed"
             exit 1
           fi
           echo "Compilation completed successfully"
-          ls -lh compiled.apk
+          ls -lh "$OUTPUT_APK"
 
       - name: Decode keystore from secret
         env:
@@ -360,14 +394,17 @@ jobs:
 
       - name: Align APK
         run: |
+          OUTPUT_APK="${{ github.event.inputs.output_apk }}"
+          ALIGNED_APK="${OUTPUT_APK%.apk}-aligned.apk"
           echo "Aligning APK..."
-          zipalign -v -p 4 compiled.apk compiled-aligned.apk
-          if [ ! -f compiled-aligned.apk ]; then
+          zipalign -v -p 4 "$OUTPUT_APK" "$ALIGNED_APK"
+          if [ ! -f "$ALIGNED_APK" ]; then
             echo "Error: APK alignment failed"
             exit 1
           fi
+          echo "ALIGNED_APK=$ALIGNED_APK" >> $GITHUB_ENV
           echo "APK aligned successfully"
-          ls -lh compiled-aligned.apk
+          ls -lh "$ALIGNED_APK"
 
       - name: Sign APK
         env:
@@ -391,12 +428,13 @@ jobs:
             exit 1
           fi
 
+          ALIGNED_APK="${{ env.ALIGNED_APK }}"
           apksigner sign --ks keystore.jks \
             --ks-pass pass:"$KEYSTORE_PASSWORD" \
             --key-pass pass:"$KEY_PASSWORD" \
             --ks-key-alias "$KEY_ALIAS" \
             --out signed.apk \
-            compiled-aligned.apk
+            "$ALIGNED_APK"
 
           if [ ! -f signed.apk ]; then
             echo "Error: APK signing failed"
