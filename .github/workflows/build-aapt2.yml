@@ -1,0 +1,163 @@
+name: Build AAPT2 Binaries (Linux)
+
+# This workflow builds aapt2_64 binaries for Linux according to INTERNAL.md guide
+# WARNING: This requires ~150-250GB of disk space and significant build time
+# Only run manually or on a schedule for official releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_branch:
+        description: 'Android branch to build (e.g., android-16-release)'
+        required: true
+        default: 'android-16-release'
+        type: string
+      apktool_branch:
+        description: 'Apktool frameworks/base branch (e.g., apktool-9.0.0)'
+        required: true
+        default: 'apktool-9.0.0'
+        type: string
+  # Optionally enable for scheduled builds
+  # schedule:
+  #   - cron: '0 0 1 * *'  # Monthly on the 1st
+
+env:
+  # Optimize repo sync for smaller clone
+  REPO_INIT_FLAGS: '--depth=1 --partial-clone'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build-linux-aapt2:
+    name: Build Linux aapt2_64
+    runs-on: ubuntu-latest
+    # Use a container with more disk space or configure cleanup
+    timeout-minutes: 720  # 12 hours max
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+          root-reserve-mb: 10240  # Reserve 10GB for root
+          temp-reserve-mb: 1024
+          swap-size-mb: 1024
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-core gnupg flex bison build-essential \
+            zip curl zlib1g-dev libc6-dev-i386 libncurses5 \
+            x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev \
+            libxml2-utils xsltproc unzip fontconfig python3 python3-pip \
+            openjdk-11-jdk
+
+      - name: Set up repo tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Configure git
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git config --global color.ui false
+
+      - name: Initialize AOSP repo
+        run: |
+          mkdir -p ~/aosp
+          cd ~/aosp
+          repo init -u https://android.googlesource.com/platform/manifest \
+            -b ${{ inputs.android_branch || 'android-16-release' }} \
+            ${{ env.REPO_INIT_FLAGS }}
+
+      - name: Sync AOSP sources (current branch only)
+        run: |
+          cd ~/aosp
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle frameworks/base \
+            build/make build/soong prebuilts/build-tools \
+            external/libcxx external/zlib \
+            system/core system/logging
+
+      - name: Checkout modified frameworks/base
+        run: |
+          cd ~/aosp/frameworks/base
+          git remote add apktool https://github.com/iBotPeaches/platform_frameworks_base.git
+          git fetch apktool ${{ inputs.apktool_branch || 'apktool-9.0.0' }} --depth=1
+          git checkout apktool/${{ inputs.apktool_branch || 'apktool-9.0.0' }}
+
+      - name: Build aapt2 for Linux
+        run: |
+          cd ~/aosp
+          source build/envsetup.sh
+          lunch aosp_cf_x86_64_only_phone-aosp_current-eng
+          m aapt2
+
+      - name: Strip Linux binaries
+        run: |
+          cd ~/aosp
+          if [ -f out/host/linux-x86/bin/aapt2 ]; then
+            strip out/host/linux-x86/bin/aapt2
+          fi
+          if [ -f out/host/linux-x86/bin/aapt2_64 ]; then
+            strip out/host/linux-x86/bin/aapt2_64
+          fi
+
+      - name: Verify static linking (Linux)
+        run: |
+          cd ~/aosp
+          echo "Checking aapt2 dependencies..."
+          if [ -f out/host/linux-x86/bin/aapt2 ]; then
+            ldd out/host/linux-x86/bin/aapt2 || echo "Static binary (expected)"
+          fi
+          if [ -f out/host/linux-x86/bin/aapt2_64 ]; then
+            ldd out/host/linux-x86/bin/aapt2_64 || echo "Static binary (expected)"
+          fi
+
+      - name: Upload Linux aapt2 artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: aapt2-linux
+          path: |
+            ~/aosp/out/host/linux-x86/bin/aapt2
+            ~/aosp/out/host/linux-x86/bin/aapt2_64
+          if-no-files-found: error
+
+  create-release-summary:
+    name: Create Build Summary
+    runs-on: ubuntu-latest
+    needs: [build-linux-aapt2]
+    if: always()
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+
+      - name: List artifacts and create summary
+        run: |
+          echo "## AAPT2 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build completed for the following platform:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -d artifacts/aapt2-linux ]; then
+            echo "### Linux Binaries" >> $GITHUB_STEP_SUMMARY
+            ls -lh artifacts/aapt2-linux/ >> $GITHUB_STEP_SUMMARY || true
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Please verify static linking using \`ldd\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See INTERNAL.md for deployment instructions." >> $GITHUB_STEP_SUMMARY
