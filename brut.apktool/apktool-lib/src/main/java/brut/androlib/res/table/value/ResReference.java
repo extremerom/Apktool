@@ -97,6 +97,12 @@ public class ResReference extends ResItem implements ResXmlEncodable, ValuesXmlS
 
         ResEntrySpec spec = resolve();
         if (spec == null) {
+            // If we have a non-null resource ID, preserve it in hex format
+            // instead of returning "@null", so the resource reference is not lost.
+            if (mId != null && mId != ResId.NULL) {
+                boolean isAttrRef = mType == Type.ATTRIBUTE;
+                return (isAttrRef ? "?" : "@") + mId.toString();
+            }
             return "@null";
         }
 
