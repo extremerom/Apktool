@@ -40,6 +40,7 @@ public class Config {
     private boolean mKeepBrokenResources;
     private boolean mAnalysisMode;
     private DecodeAssets mDecodeAssets;
+    private boolean mUseAnalysisTools;
 
     // Build options
     private boolean mNoApk;
@@ -74,6 +75,7 @@ public class Config {
         mKeepBrokenResources = false;
         mAnalysisMode = false;
         mDecodeAssets = DecodeAssets.FULL;
+        mUseAnalysisTools = false;
 
         // Build options
         mNoApk = false;
@@ -279,5 +281,13 @@ public class Config {
 
     public void setCollapseResNames(boolean collapseResNames) {
         mCollapseResNames = collapseResNames;
+    }
+
+    public boolean isUseAnalysisTools() {
+        return mUseAnalysisTools;
+    }
+
+    public void setUseAnalysisTools(boolean useAnalysisTools) {
+        mUseAnalysisTools = useAnalysisTools;
     }
 }

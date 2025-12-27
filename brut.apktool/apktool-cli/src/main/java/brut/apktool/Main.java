@@ -142,6 +142,12 @@ public class Main {
         .desc("Do not decode assets.")
         .get();
 
+    private static final Option decodeUseAnalysisToolsOption = Option.builder()
+        .longOpt("use-analysis-tools")
+        .desc("Run additional DEX analysis tools (dex2jar, jadx, smali/baksmali, Androguard).\n"
+            + "Results will be saved in the 'tools' directory.")
+        .get();
+
     private static final Option decodeOutputOption = Option.builder("o")
         .longOpt("output")
         .desc("Output decoded files to <dir>. (default: apk.out)")
@@ -264,6 +270,7 @@ public class Main {
                 decodeOptions.addOption(decodeOnlyMainClassesOption);
                 decodeOptions.addOption(decodeOnlyManifestOption);
                 decodeOptions.addOption(decodeResResolveModeOption);
+                decodeOptions.addOption(decodeUseAnalysisToolsOption);
             }
         }
 
@@ -508,6 +515,9 @@ public class Main {
         }
         if (cli.hasOption(decodeNoAssetsOption)) {
             config.setDecodeAssets(Config.DecodeAssets.NONE);
+        }
+        if (cli.hasOption(decodeUseAnalysisToolsOption)) {
+            config.setUseAnalysisTools(true);
         }
 
         File outDir;

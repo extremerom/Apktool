@@ -8,6 +8,29 @@ Apktool is a tool for reverse engineering third-party, closed, binary, Android a
 
 Apktool is **NOT** intended for piracy and other non-legal uses. It could be used for localizing and adding features, adding support for custom platforms, and other GOOD purposes. Just try to be fair with the authors of an app, that you use and probably like.
 
+### Features
+
+- **Decoding resources** to nearly original form
+- **Rebuilding** decoded resources back to binary APK/JAR
+- **Smali Debugging** (with smali or JesusFreke's project)
+- **Additional DEX Analysis Tools** (NEW) - Run dex2jar, jadx, smali/baksmali, and Androguard analysis tools with `--use-analysis-tools` option
+
+#### Using Additional Analysis Tools
+
+When decoding an APK, you can now run additional analysis tools automatically:
+
+```bash
+apktool d --use-analysis-tools your-app.apk
+```
+
+This will create a `tools/` directory containing results from:
+- **dex2jar**: DEX to JAR conversion
+- **jadx**: Java decompilation
+- **smali/baksmali**: Analysis summary (already integrated in main decode)
+- **Androguard**: Advanced security and flow analysis
+
+Tools are optional and only run if installed on your system. See the generated `tools/README.md` for more information.
+
 ### Branches
 - `main` - In-development Apktool 3.x branch
 - `2.x` - Maintenance branch for Apktool 2.x releases

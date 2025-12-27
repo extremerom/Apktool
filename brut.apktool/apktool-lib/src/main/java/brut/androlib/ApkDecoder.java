@@ -16,6 +16,7 @@
  */
 package brut.androlib;
 
+import brut.androlib.dex.DexAnalysisToolsRunner;
 import brut.androlib.exceptions.AndrolibException;
 import brut.androlib.exceptions.InFileNotFoundException;
 import brut.androlib.exceptions.OutDirExistsException;
@@ -93,6 +94,10 @@ public class ApkDecoder {
             copyRawFiles(outDir);
             copyUnknownFiles(outDir);
             writeApkInfo(outDir);
+            
+            if (mConfig.isUseAnalysisTools()) {
+                runAnalysisTools(outDir);
+            }
 
             return mApkInfo;
         } finally {
@@ -370,5 +375,11 @@ public class ApkDecoder {
 
         // Serialize ApkInfo to file.
         mApkInfo.save(new File(outDir, "apktool.yml"));
+    }
+
+    private void runAnalysisTools(File outDir) throws AndrolibException {
+        LOGGER.info("Running additional DEX analysis tools...");
+        DexAnalysisToolsRunner toolsRunner = new DexAnalysisToolsRunner(mApkFile, outDir);
+        toolsRunner.runAnalysisTools();
     }
 }
